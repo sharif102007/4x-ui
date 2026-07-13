@@ -1,0 +1,211 @@
+/* 4x-ui theme refinements.
+ * Normal Dark keeps the original 4x-ui palette.  Every visual override below
+ * is scoped to the Ultra Dark flag so it becomes a true AMOLED theme only
+ * when the user enables Ultra Dark in the theme menu.
+ */
+
+body,
+.ant-typography,
+.ant-btn,
+.ant-input,
+.ant-select,
+.ant-form,
+.ant-menu,
+.ant-table,
+.ant-modal,
+.ant-message,
+.ant-notification {
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system,
+    BlinkMacSystemFont, 'Vazirmatn', 'Segoe UI', sans-serif;
+}
+
+html[data-theme='ultra-dark'] {
+  --color-primary-100: #4de1c1;
+  --dark-color-background: #000000;
+  --dark-color-surface-100: #050505;
+  --dark-color-surface-200: #0a0a0a;
+  --dark-color-surface-300: #101010;
+  --dark-color-surface-400: rgba(255, 255, 255, .12);
+  --dark-color-surface-500: #151515;
+  --dark-color-surface-600: #202020;
+  --dark-color-surface-700: #020202;
+  --dark-color-surface-700-rgb: 2, 2, 2;
+  --dark-color-text-primary: rgba(245, 245, 245, .92);
+  --dark-color-stroke: #1d1d1d;
+  --dark-color-btn-danger: #d94b63;
+  --dark-color-btn-danger-hover: #f06479;
+  --dark-color-tag-green-bg: 5, 25, 21;
+  --dark-color-tag-green-border: 30, 104, 87;
+  --dark-color-tag-green-color: #4de1c1;
+  --dark-color-tag-purple-bg: #170d1c;
+  --dark-color-tag-purple-border: #634078;
+  --dark-color-tag-purple-color: #d69aff;
+  --dark-color-tag-orange-bg: #171104;
+  --dark-color-tag-orange-border: #66501d;
+  --dark-color-tag-orange-color: #ffd36c;
+  --dark-color-tag-blue-bg: #061219;
+  --dark-color-tag-blue-border: #164f67;
+  --dark-color-tag-blue-color: #65d5f4;
+  --dark-color-table-header-bg: #020202;
+  --dark-color-table-body-bg: #050505;
+  --dark-color-table-hover: rgba(77, 225, 193, .07);
+  --dark-color-table-ring: rgba(77, 225, 193, .2);
+  --dark-color-scrollbar: #202020;
+  --dark-color-scrollbar-webkit: #606060;
+  --dark-color-scrollbar-webkit-hover: #858585;
+}
+
+html[data-theme='ultra-dark'] body.dark,
+html[data-theme='ultra-dark'] body.dark #app,
+html[data-theme='ultra-dark'] .dark > .ant-layout,
+html[data-theme='ultra-dark'] .dark .ant-layout-content {
+  background: #000;
+}
+
+html[data-theme='ultra-dark'] .dark .ant-layout-sider,
+html[data-theme='ultra-dark'] .dark .ant-menu-dark,
+html[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-sub,
+html[data-theme='ultra-dark'] .dark .ant-card,
+html[data-theme='ultra-dark'] .dark .ant-table,
+html[data-theme='ultra-dark'] .dark .ant-tabs,
+html[data-theme='ultra-dark'] .dark .ant-collapse-content,
+html[data-theme='ultra-dark'] .dark .ant-drawer-content {
+  background: var(--dark-color-surface-100);
+  color: var(--dark-color-text-primary);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-card,
+html[data-theme='ultra-dark'] .dark .ant-tabs,
+html[data-theme='ultra-dark'] .dark .ant-collapse,
+html[data-theme='ultra-dark'] .dark .ant-table-wrapper,
+html[data-theme='ultra-dark'] .dark .ant-alert,
+html[data-theme='ultra-dark'] .dark .ant-modal-content,
+html[data-theme='ultra-dark'] .dark .ant-drawer-content {
+  border-color: var(--dark-color-surface-400);
+  border-radius: 1.25rem;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .45);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-card-head,
+html[data-theme='ultra-dark'] .dark .ant-modal-header,
+html[data-theme='ultra-dark'] .dark .ant-modal-footer,
+html[data-theme='ultra-dark'] .dark .ant-tabs-bar,
+html[data-theme='ultra-dark'] .dark .ant-collapse > .ant-collapse-item,
+html[data-theme='ultra-dark'] .dark .ant-table-thead > tr > th,
+html[data-theme='ultra-dark'] .dark .ant-table-tbody > tr > td {
+  border-color: var(--dark-color-surface-400);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-card-head,
+html[data-theme='ultra-dark'] .dark .ant-modal-header,
+html[data-theme='ultra-dark'] .dark .ant-table-thead > tr > th {
+  background: var(--dark-color-table-header-bg);
+  color: var(--dark-color-text-primary);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-table,
+html[data-theme='ultra-dark'] .dark .ant-table table,
+html[data-theme='ultra-dark'] .dark .ant-table-tbody > tr > td {
+  background: var(--dark-color-table-body-bg);
+  color: var(--dark-color-text-primary);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-table-tbody > tr:hover > td,
+html[data-theme='ultra-dark'] .dark .ant-table-tbody > tr.ant-table-row-hover > td {
+  background: var(--dark-color-table-hover) !important;
+}
+
+html[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-item-selected,
+html[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-item-active,
+html[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-item:hover,
+html[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-submenu-title:hover {
+  color: #00120f;
+  background: linear-gradient(90deg, #4de1c1, #35b8e8) !important;
+  border-radius: .75rem;
+}
+
+html[data-theme='ultra-dark'] .dark .ant-btn {
+  border-radius: .75rem;
+  border-color: var(--dark-color-surface-400);
+  background: var(--dark-color-surface-200);
+  color: var(--dark-color-text-primary);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-btn:hover,
+html[data-theme='ultra-dark'] .dark .ant-btn:focus {
+  border-color: var(--color-primary-100);
+  color: var(--color-primary-100);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-btn-primary,
+html[data-theme='ultra-dark'] .dark .ant-btn-primary:hover,
+html[data-theme='ultra-dark'] .dark .ant-btn-primary:focus {
+  border-color: transparent;
+  color: #00120f;
+  background: linear-gradient(135deg, #4de1c1, #27c7aa);
+  box-shadow: 0 8px 20px rgba(77, 225, 193, .16);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-input,
+html[data-theme='ultra-dark'] .dark .ant-input-number,
+html[data-theme='ultra-dark'] .dark .ant-input-number-input,
+html[data-theme='ultra-dark'] .dark .ant-select-selection,
+html[data-theme='ultra-dark'] .dark .ant-input-affix-wrapper,
+html[data-theme='ultra-dark'] .dark textarea.ant-input {
+  border-color: var(--dark-color-surface-400);
+  border-radius: .75rem;
+  background: var(--dark-color-surface-200);
+  color: var(--dark-color-text-primary);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-input:hover,
+html[data-theme='ultra-dark'] .dark .ant-input:focus,
+html[data-theme='ultra-dark'] .dark .ant-input-number:hover,
+html[data-theme='ultra-dark'] .dark .ant-input-number:focus,
+html[data-theme='ultra-dark'] .dark .ant-select-focused .ant-select-selection {
+  border-color: #4de1c1;
+  box-shadow: 0 0 0 2px rgba(77, 225, 193, .12);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-tabs-tab:hover,
+html[data-theme='ultra-dark'] .dark .ant-tabs-tab-active {
+  color: #4de1c1;
+}
+
+html[data-theme='ultra-dark'] .dark .ant-tabs-ink-bar {
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #4de1c1, #35b8e8);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-switch-checked {
+  background: linear-gradient(90deg, #35b8e8, #4de1c1);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-alert-info,
+html[data-theme='ultra-dark'] .dark .ant-alert-success {
+  background: rgba(77, 225, 193, .07);
+  border-color: rgba(77, 225, 193, .28);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-alert-warning {
+  background: rgba(255, 211, 108, .07);
+  border-color: rgba(255, 211, 108, .28);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-alert-error {
+  background: rgba(255, 113, 130, .07);
+  border-color: rgba(255, 113, 130, .28);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-pagination-item,
+html[data-theme='ultra-dark'] .dark .ant-pagination-prev .ant-pagination-item-link,
+html[data-theme='ultra-dark'] .dark .ant-pagination-next .ant-pagination-item-link {
+  border-color: var(--dark-color-surface-400);
+  background: var(--dark-color-surface-200);
+}
+
+html[data-theme='ultra-dark'] .dark .ant-pagination-item-active {
+  border-color: #4de1c1;
+  background: rgba(77, 225, 193, .12);
+}

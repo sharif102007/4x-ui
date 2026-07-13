@@ -1,0 +1,24 @@
+services:
+  4xui:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: 4xui_app
+    # hostname: yourhostname <- optional
+    volumes:
+      - $PWD/db/:/etc/x-ui/
+      - $PWD/cert/:/root/cert/
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    init: true
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    tty: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host
+    restart: unless-stopped
