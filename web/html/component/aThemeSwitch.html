@@ -1,0 +1,182 @@
+{{define "component/themeSwitchTemplate"}}
+<template>
+  <a-menu :theme="themeSwitcher.currentTheme" mode="inline" selected-keys="">
+    <a-sub-menu>
+      <span slot="title">
+        <a-icon type="bulb" :theme="themeSwitcher.isDarkTheme ? 'filled' : 'outlined'"></a-icon>
+        <span>{{ i18n "menu.theme" }}</span>
+      </span>
+      <a-menu-item id="change-theme" class="ant-menu-theme-switch" @mousedown="themeSwitcher.animationsOff()">
+        <span>{{ i18n "menu.dark" }}</span>
+        <a-switch :style="{ marginLeft: '2px' }" size="small" :default-checked="themeSwitcher.isDarkTheme"
+          @change="themeSwitcher.toggleTheme()"></a-switch>
+      </a-menu-item>
+      <a-menu-item id="change-theme-ultra" v-if="themeSwitcher.isDarkTheme" class="ant-menu-theme-switch"
+        @mousedown="themeSwitcher.animationsOffUltra()">
+        <span>{{ i18n "menu.ultraDark" }}</span>
+        <a-checkbox :style="{ marginLeft: '2px' }" :checked="themeSwitcher.isUltra"
+          @click="themeSwitcher.toggleUltra()"></a-checkbox>
+      </a-menu-item>
+      <a-menu-item id="change-theme-soft" v-if="themeSwitcher.isDarkTheme" class="ant-menu-theme-switch"
+        @mousedown="themeSwitcher.animationsOffSoft()">
+        <span>{{ i18n "menu.softDark" }}</span>
+        <a-checkbox :style="{ marginLeft: '2px' }" :checked="themeSwitcher.isSoft"
+          @click="themeSwitcher.toggleSoft()"></a-checkbox>
+      </a-menu-item>
+    </a-sub-menu>
+  </a-menu>
+</template>
+{{end}}
+
+{{define "component/themeSwitchTemplateLogin"}}
+<template>
+  <a-space @mousedown="themeSwitcher.animationsOff()" id="change-theme" direction="vertical" :size="10"
+    :style="{ width: '100%' }">
+    <a-space direction="horizontal" size="small">
+      <a-switch size="small" :default-checked="themeSwitcher.isDarkTheme"
+        @change="themeSwitcher.toggleTheme()"></a-switch>
+      <span>{{ i18n "menu.dark" }}</span>
+    </a-space>
+    <a-space v-if="themeSwitcher.isDarkTheme" direction="horizontal" size="small">
+      <a-checkbox :checked="themeSwitcher.isUltra" @click="themeSwitcher.toggleUltra()"></a-checkbox>
+      <span>{{ i18n "menu.ultraDark" }}</span>
+    </a-space>
+    <a-space v-if="themeSwitcher.isDarkTheme" direction="horizontal" size="small">
+      <a-checkbox :checked="themeSwitcher.isSoft" @click="themeSwitcher.toggleSoft()"></a-checkbox>
+      <span>{{ i18n "menu.softDark" }}</span>
+    </a-space>
+  </a-space>
+</template>
+{{end}}
+
+{{define "component/aThemeSwitch"}}
+<script>
+  // Three dark variants, mutually exclusive:
+  //   normal - the base dark palette
+  //   ultra  - AMOLED, pure black
+  //   soft   - eye comfort: no pure black, no pure white, muted accents
+  const DARK_VARIANTS = ['normal', 'ultra', 'soft'];
+
+  function applyDarkVariant(variant) {
+    if (variant === 'ultra') {
+      document.documentElement.setAttribute('data-theme', 'ultra-dark');
+    } else if (variant === 'soft') {
+      document.documentElement.setAttribute('data-theme', 'soft-dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }
+
+  function readDarkVariant() {
+    const stored = localStorage.getItem('darkVariant');
+    if (DARK_VARIANTS.includes(stored)) {
+      return stored;
+    }
+    // Migrate the old boolean key. Anyone who had AMOLED on keeps it; everyone
+    // else lands on eye comfort, which is also the default for a fresh install.
+    if (localStorage.getItem('isUltraDarkThemeEnabled') === 'true') {
+      return 'ultra';
+    }
+    return 'soft';
+  }
+
+  function createThemeSwitcher() {
+    const darkModePreference = localStorage.getItem('dark-mode');
+    const isDarkTheme = darkModePreference === null ? true : darkModePreference === 'true';
+    const darkVariant = readDarkVariant();
+    applyDarkVariant(darkVariant);
+    const theme = isDarkTheme ? 'dark' : 'light';
+    document.querySelector('body').setAttribute('class', theme);
+    return {
+      animationsOff() {
+        document.documentElement.setAttribute('data-theme-animations', 'off');
+        const themeAnimations = document.querySelector('#change-theme');
+        themeAnimations.addEventListener('mouseleave', () => {
+          document.documentElement.removeAttribute('data-theme-animations');
+        });
+        themeAnimations.addEventListener('touchend', () => {
+          document.documentElement.removeAttribute('data-theme-animations');
+        });
+      },
+      animationsOffSoft() {
+        document.documentElement.setAttribute('data-theme-animations', 'off');
+        const el = document.querySelector('#change-theme-soft');
+        if (!el) return;
+        el.addEventListener('mouseleave', () => {
+          document.documentElement.removeAttribute('data-theme-animations');
+        });
+        el.addEventListener('touchend', () => {
+          document.documentElement.removeAttribute('data-theme-animations');
+        });
+      },
+      animationsOffUltra() {
+        document.documentElement.setAttribute('data-theme-animations', 'off');
+        const themeAnimationsUltra = document.querySelector('#change-theme-ultra');
+        themeAnimationsUltra.addEventListener('mouseleave', () => {
+          document.documentElement.removeAttribute('data-theme-animations');
+        });
+        themeAnimationsUltra.addEventListener('touchend', () => {
+          document.documentElement.removeAttribute('data-theme-animations');
+        });
+      },
+      isDarkTheme,
+      darkVariant,
+      get currentTheme() {
+        return this.isDarkTheme ? 'dark' : 'light';
+      },
+      get isUltra() {
+        return this.darkVariant === 'ultra';
+      },
+      get isSoft() {
+        return this.darkVariant === 'soft';
+      },
+      toggleTheme() {
+        this.isDarkTheme = !this.isDarkTheme;
+        localStorage.setItem('dark-mode', this.isDarkTheme);
+        document.querySelector('body').setAttribute('class', this.isDarkTheme ? 'dark' : 'light');
+        document.getElementById('message').className = themeSwitcher.currentTheme;
+      },
+      // Selecting a variant that is already active returns to plain dark, so each
+      // checkbox behaves as a toggle while the two stay mutually exclusive.
+      selectDarkVariant(variant) {
+        this.darkVariant = this.darkVariant === variant ? 'normal' : variant;
+        applyDarkVariant(this.darkVariant);
+        localStorage.setItem('darkVariant', this.darkVariant);
+        // Keep the legacy key in step for anything still reading it.
+        localStorage.setItem('isUltraDarkThemeEnabled', (this.darkVariant === 'ultra').toString());
+      },
+      toggleUltra() {
+        this.selectDarkVariant('ultra');
+      },
+      toggleSoft() {
+        this.selectDarkVariant('soft');
+      }
+    };
+  }
+  const themeSwitcher = createThemeSwitcher();
+  Vue.component('a-theme-switch', {
+    template: `{{template "component/themeSwitchTemplate" .}}`,
+    data: () => ({
+      themeSwitcher
+    }),
+    mounted() {
+      this.$message.config({
+        getContainer: () => document.getElementById('message')
+      });
+      document.getElementById('message').className = themeSwitcher.currentTheme;
+    }
+  });
+  Vue.component('a-theme-switch-login', {
+    template: `{{template "component/themeSwitchTemplateLogin" .}}`,
+    data: () => ({
+      themeSwitcher
+    }),
+    mounted() {
+      this.$message.config({
+        getContainer: () => document.getElementById('message')
+      });
+      document.getElementById('message').className = themeSwitcher.currentTheme;
+    }
+  });
+</script>
+{{end}}
