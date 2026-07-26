@@ -1,0 +1,22 @@
+[Unit]
+Description=x-ui Service
+After=network.target
+Wants=network.target
+
+[Service]
+EnvironmentFile=-/etc/conf.d/x-ui
+Environment="XRAY_VMESS_AEAD_FORCED=false"
+Type=simple
+WorkingDirectory=/usr/lib/x-ui/
+ExecStart=/usr/lib/x-ui/x-ui
+ExecReload=kill -USR1 $MAINPID
+Restart=on-failure
+RestartSec=5s
+# Bound shutdown. Without this systemd waits DefaultTimeoutStopSec (90s)
+# before SIGKILL, which is what made "x-ui update" sit at "Stopping x-ui...".
+TimeoutStopSec=15s
+# Reap child processes (xray and helpers) together with the panel.
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

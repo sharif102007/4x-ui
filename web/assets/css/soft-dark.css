@@ -1,0 +1,263 @@
+/* 4x-ui "Eye Comfort" dark theme.
+ *
+ * Scoped to [data-theme='soft-dark']. Structure, spacing and component
+ * dimensions are untouched - only colour.
+ *
+ * The design goal is reduced eye strain over long sessions, which mostly means
+ * refusing the two things that cause it:
+ *
+ *   1. No pure black background. #000 against near-white text is roughly a
+ *      21:1 contrast ratio, and on OLED panels the hard on/off pixel edges make
+ *      light text bloom into the background (halation). This theme sits around
+ *      9-10:1, which is still comfortably above the WCAG AA floor of 4.5:1 while
+ *      being far less punishing.
+ *   2. No pure white text and no fully saturated accents. Text is a soft grey at
+ *      82% opacity; the teal accent is desaturated and lowered in luminance so it
+ *      stops glowing.
+ *
+ * Greys are very slightly warm, which reduces the blue component without the
+ * yellow cast of a blue-light filter.
+ */
+
+[data-theme='soft-dark'] {
+  /* Desaturated accent: same hue family as the default teal, much lower chroma
+     and luminance so it reads as an accent instead of a light source. */
+  --color-primary-100: #6cb3a4;
+
+  --dark-color-background: #191b1e;
+  --dark-color-surface-100: #1e2125;
+  --dark-color-surface-200: #23262b;
+  --dark-color-surface-300: #282c31;
+  --dark-color-surface-400: rgba(255, 255, 255, .085);
+  --dark-color-surface-500: #2d3137;
+  --dark-color-surface-600: #363a41;
+  --dark-color-surface-700: #16181b;
+  --dark-color-surface-700-rgb: 22, 24, 27;
+
+  /* Soft grey, never #fff. */
+  --dark-color-text-primary: rgba(223, 227, 232, .82);
+  --dark-color-stroke: #2b2f35;
+
+  --dark-color-btn-danger: #c8697a;
+  --dark-color-btn-danger-hover: #d97e8e;
+
+  --dark-color-tag-green-bg: 30, 42, 39;
+  --dark-color-tag-green-border: 58, 92, 84;
+  --dark-color-tag-green-color: #7cc0b1;
+
+  --dark-color-tag-purple-bg: #26202c;
+  --dark-color-tag-purple-border: #574a64;
+  --dark-color-tag-purple-color: #b79ccb;
+
+  --dark-color-tag-orange-bg: #2a2419;
+  --dark-color-tag-orange-border: #5e5233;
+  --dark-color-tag-orange-color: #d9bd82;
+
+  --dark-color-tag-blue-bg: #1c252b;
+  --dark-color-tag-blue-border: #3f5a68;
+  --dark-color-tag-blue-color: #86b6c9;
+
+  --dark-color-table-header-bg: #1c1f23;
+  --dark-color-table-body-bg: #1e2125;
+  --dark-color-table-hover: rgba(108, 179, 164, .06);
+  --dark-color-table-ring: rgba(108, 179, 164, .18);
+
+  --dark-color-scrollbar: #2b2f35;
+  --dark-color-scrollbar-webkit: #4a5057;
+}
+
+/* Subpixel-to-greyscale antialiasing keeps light-on-dark text from looking
+   over-thickened, which also helps perceived sharpness at low contrast. */
+[data-theme='soft-dark'] body.dark {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme='soft-dark'] body.dark,
+[data-theme='soft-dark'] body.dark #app,
+[data-theme='soft-dark'] .dark > .ant-layout,
+[data-theme='soft-dark'] .dark .ant-layout-content {
+  background: var(--dark-color-background);
+}
+
+[data-theme='soft-dark'] .dark .ant-layout-sider,
+[data-theme='soft-dark'] .dark .ant-menu-dark,
+[data-theme='soft-dark'] .dark .ant-menu-dark .ant-menu-sub,
+[data-theme='soft-dark'] .dark .ant-card,
+[data-theme='soft-dark'] .dark .ant-table,
+[data-theme='soft-dark'] .dark .ant-tabs,
+[data-theme='soft-dark'] .dark .ant-collapse-content,
+[data-theme='soft-dark'] .dark .ant-drawer-content {
+  background: var(--dark-color-surface-100);
+  color: var(--dark-color-text-primary);
+}
+
+/* Softer, shallower shadow: a heavy drop shadow on a non-black background just
+   muddies the edge. */
+[data-theme='soft-dark'] .dark .ant-card,
+[data-theme='soft-dark'] .dark .ant-tabs,
+[data-theme='soft-dark'] .dark .ant-collapse,
+[data-theme='soft-dark'] .dark .ant-table-wrapper,
+[data-theme='soft-dark'] .dark .ant-alert,
+[data-theme='soft-dark'] .dark .ant-modal-content,
+[data-theme='soft-dark'] .dark .ant-drawer-content {
+  border-color: var(--dark-color-surface-400);
+  border-radius: 1.25rem;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
+}
+
+[data-theme='soft-dark'] .dark .ant-card-head,
+[data-theme='soft-dark'] .dark .ant-modal-header,
+[data-theme='soft-dark'] .dark .ant-modal-footer,
+[data-theme='soft-dark'] .dark .ant-tabs-bar,
+[data-theme='soft-dark'] .dark .ant-collapse > .ant-collapse-item,
+[data-theme='soft-dark'] .dark .ant-table-thead > tr > th,
+[data-theme='soft-dark'] .dark .ant-table-tbody > tr > td {
+  border-color: var(--dark-color-surface-400);
+}
+
+[data-theme='soft-dark'] .dark .ant-card-head,
+[data-theme='soft-dark'] .dark .ant-modal-header,
+[data-theme='soft-dark'] .dark .ant-table-thead > tr > th {
+  background: var(--dark-color-table-header-bg);
+  color: var(--dark-color-text-primary);
+}
+
+[data-theme='soft-dark'] .dark .ant-table,
+[data-theme='soft-dark'] .dark .ant-table table,
+[data-theme='soft-dark'] .dark .ant-table-tbody > tr > td {
+  background: var(--dark-color-table-body-bg);
+  color: var(--dark-color-text-primary);
+}
+
+[data-theme='soft-dark'] .dark .ant-table-tbody > tr:hover > td,
+[data-theme='soft-dark'] .dark .ant-table-tbody > tr.ant-table-row-hover > td {
+  background: var(--dark-color-table-hover) !important;
+}
+
+/* Flat muted fill instead of a bright two-colour gradient. Dark text on the
+   selected item keeps it readable without the accent having to be bright. */
+[data-theme='soft-dark'] .dark .ant-menu-dark .ant-menu-item-selected,
+[data-theme='soft-dark'] .dark .ant-menu-dark .ant-menu-item-active,
+[data-theme='soft-dark'] .dark .ant-menu-dark .ant-menu-item:hover,
+[data-theme='soft-dark'] .dark .ant-menu-dark .ant-menu-submenu-title:hover {
+  color: #10201d;
+  background: #6cb3a4 !important;
+  border-radius: .75rem;
+}
+
+[data-theme='soft-dark'] .dark .ant-btn {
+  border-radius: .75rem;
+  border-color: var(--dark-color-surface-400);
+  background: var(--dark-color-surface-200);
+  color: var(--dark-color-text-primary);
+}
+
+[data-theme='soft-dark'] .dark .ant-btn:hover,
+[data-theme='soft-dark'] .dark .ant-btn:focus {
+  border-color: var(--color-primary-100);
+  color: var(--color-primary-100);
+}
+
+/* No glow shadow on the primary button - that halo is a large part of what makes
+   the AMOLED theme tiring. */
+[data-theme='soft-dark'] .dark .ant-btn-primary,
+[data-theme='soft-dark'] .dark .ant-btn-primary:hover,
+[data-theme='soft-dark'] .dark .ant-btn-primary:focus {
+  border-color: transparent;
+  color: #10201d;
+  background: #6cb3a4;
+  box-shadow: none;
+}
+
+[data-theme='soft-dark'] .dark .ant-input,
+[data-theme='soft-dark'] .dark .ant-input-number,
+[data-theme='soft-dark'] .dark .ant-input-number-input,
+[data-theme='soft-dark'] .dark .ant-select-selection,
+[data-theme='soft-dark'] .dark .ant-input-affix-wrapper,
+[data-theme='soft-dark'] .dark textarea.ant-input {
+  border-color: var(--dark-color-surface-400);
+  border-radius: .75rem;
+  background: var(--dark-color-surface-200);
+  color: var(--dark-color-text-primary);
+}
+
+[data-theme='soft-dark'] .dark .ant-input:hover,
+[data-theme='soft-dark'] .dark .ant-input:focus,
+[data-theme='soft-dark'] .dark .ant-input-number:hover,
+[data-theme='soft-dark'] .dark .ant-input-number:focus,
+[data-theme='soft-dark'] .dark .ant-select-focused .ant-select-selection {
+  border-color: #6cb3a4;
+  box-shadow: 0 0 0 2px rgba(108, 179, 164, .10);
+}
+
+[data-theme='soft-dark'] .dark .ant-input::placeholder,
+[data-theme='soft-dark'] .dark textarea.ant-input::placeholder {
+  color: rgba(223, 227, 232, .38);
+}
+
+[data-theme='soft-dark'] .dark .ant-tabs-tab:hover,
+[data-theme='soft-dark'] .dark .ant-tabs-tab-active {
+  color: #6cb3a4;
+}
+
+[data-theme='soft-dark'] .dark .ant-tabs-ink-bar {
+  background: #6cb3a4;
+  height: 3px;
+  border-radius: 3px;
+}
+
+[data-theme='soft-dark'] .dark .ant-switch-checked {
+  background: #6cb3a4;
+}
+
+[data-theme='soft-dark'] .dark .ant-alert-info,
+[data-theme='soft-dark'] .dark .ant-alert-success {
+  background: rgba(108, 179, 164, .06);
+  border-color: rgba(108, 179, 164, .24);
+}
+
+[data-theme='soft-dark'] .dark .ant-alert-warning {
+  background: rgba(217, 189, 130, .06);
+  border-color: rgba(217, 189, 130, .24);
+}
+
+[data-theme='soft-dark'] .dark .ant-alert-error {
+  background: rgba(200, 105, 122, .06);
+  border-color: rgba(200, 105, 122, .24);
+}
+
+[data-theme='soft-dark'] .dark .ant-pagination-item,
+[data-theme='soft-dark'] .dark .ant-pagination-prev .ant-pagination-item-link,
+[data-theme='soft-dark'] .dark .ant-pagination-next .ant-pagination-item-link {
+  border-color: var(--dark-color-surface-400);
+  background: var(--dark-color-surface-200);
+}
+
+[data-theme='soft-dark'] .dark .ant-pagination-item-active {
+  border-color: #6cb3a4;
+  background: rgba(108, 179, 164, .10);
+}
+
+/* Progress rings and charts on the dashboard: mute the stroke so a full ring is
+   not a bright arc on a dark field. */
+[data-theme='soft-dark'] .dark .ant-progress-circle-path,
+[data-theme='soft-dark'] .dark .ant-progress-bg {
+  stroke: #6cb3a4;
+  background: #6cb3a4;
+}
+
+[data-theme='soft-dark'] .dark .ant-progress-circle-trail,
+[data-theme='soft-dark'] .dark .ant-progress-inner {
+  stroke: var(--dark-color-surface-500);
+  background: var(--dark-color-surface-500);
+}
+
+/* Honour the OS "reduce motion" preference: theme transitions are one more
+   thing that adds strain over a long session. */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='soft-dark'] * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
