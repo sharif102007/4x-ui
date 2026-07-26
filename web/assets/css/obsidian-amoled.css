@@ -1,0 +1,142 @@
+/* 4x-ui AMOLED theme. Scoped to [data-theme='ultra-dark'] so the Ultra Dark
+   toggle actually controls it. Every rule here previously applied to .dark
+   unconditionally, which meant the panel was pure black whether the toggle
+   was on or off and there was no real Normal Dark theme. */
+[data-theme='ultra-dark'] {
+  --color-primary-100: #4de1c1;
+  --dark-color-background: #000000;
+  --dark-color-surface-100: #050505;
+  --dark-color-surface-200: #0a0a0a;
+  --dark-color-surface-300: #101010;
+  --dark-color-surface-400: rgba(255,255,255,.12);
+  --dark-color-surface-500: #151515;
+  --dark-color-surface-600: #202020;
+  --dark-color-surface-700: #020202;
+  --dark-color-surface-700-rgb: 2,2,2;
+  --dark-color-text-primary: rgba(245,245,245,.92);
+  --dark-color-stroke: #1d1d1d;
+  --dark-color-btn-danger: #d94b63;
+  --dark-color-btn-danger-hover: #f06479;
+  --dark-color-tag-green-bg: 5,25,21;
+  --dark-color-tag-green-border: 30,104,87;
+  --dark-color-tag-green-color: #4de1c1;
+  --dark-color-tag-purple-bg: #170d1c;
+  --dark-color-tag-purple-border: #634078;
+  --dark-color-tag-purple-color: #d69aff;
+  --dark-color-tag-orange-bg: #171104;
+  --dark-color-tag-orange-border: #66501d;
+  --dark-color-tag-orange-color: #ffd36c;
+  --dark-color-tag-blue-bg: #061219;
+  --dark-color-tag-blue-border: #164f67;
+  --dark-color-tag-blue-color: #65d5f4;
+  --dark-color-table-header-bg: #020202;
+  --dark-color-table-body-bg: #050505;
+  --dark-color-table-hover: rgba(77,225,193,.07);
+  --dark-color-table-ring: rgba(77,225,193,.2);
+  --dark-color-scrollbar: #202020;
+  --dark-color-scrollbar-webkit: #606060;
+}
+
+/* Typography is not theme specific: apply it to every theme. */
+body,
+.ant-typography,
+.ant-btn,
+.ant-input,
+.ant-select,
+.ant-form,
+.ant-menu,
+.ant-table,
+.ant-modal,
+.ant-message,
+.ant-notification {
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
+    'Vazirmatn', 'Segoe UI', sans-serif;
+}
+
+[data-theme='ultra-dark'] body.dark,
+[data-theme='ultra-dark'] body.dark #app,
+[data-theme='ultra-dark'] .dark > .ant-layout,
+[data-theme='ultra-dark'] .dark .ant-layout-content { background: #000; }
+
+[data-theme='ultra-dark'] .dark .ant-layout-sider,
+[data-theme='ultra-dark'] .dark .ant-menu-dark,
+[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-sub,
+[data-theme='ultra-dark'] .dark .ant-card,
+[data-theme='ultra-dark'] .dark .ant-table,
+[data-theme='ultra-dark'] .dark .ant-tabs,
+[data-theme='ultra-dark'] .dark .ant-collapse-content,
+[data-theme='ultra-dark'] .dark .ant-drawer-content { background: var(--dark-color-surface-100); color: var(--dark-color-text-primary); }
+
+[data-theme='ultra-dark'] .dark .ant-card,
+[data-theme='ultra-dark'] .dark .ant-tabs,
+[data-theme='ultra-dark'] .dark .ant-collapse,
+[data-theme='ultra-dark'] .dark .ant-table-wrapper,
+[data-theme='ultra-dark'] .dark .ant-alert,
+[data-theme='ultra-dark'] .dark .ant-modal-content,
+[data-theme='ultra-dark'] .dark .ant-drawer-content { border-color: var(--dark-color-surface-400); border-radius: 1.25rem; box-shadow: 0 16px 42px rgba(0,0,0,.45); }
+
+[data-theme='ultra-dark'] .dark .ant-card-head,
+[data-theme='ultra-dark'] .dark .ant-modal-header,
+[data-theme='ultra-dark'] .dark .ant-modal-footer,
+[data-theme='ultra-dark'] .dark .ant-tabs-bar,
+[data-theme='ultra-dark'] .dark .ant-collapse > .ant-collapse-item,
+[data-theme='ultra-dark'] .dark .ant-table-thead > tr > th,
+[data-theme='ultra-dark'] .dark .ant-table-tbody > tr > td { border-color: var(--dark-color-surface-400); }
+
+[data-theme='ultra-dark'] .dark .ant-card-head,
+[data-theme='ultra-dark'] .dark .ant-modal-header,
+[data-theme='ultra-dark'] .dark .ant-table-thead > tr > th { background: var(--dark-color-table-header-bg); color: var(--dark-color-text-primary); }
+
+[data-theme='ultra-dark'] .dark .ant-table,
+[data-theme='ultra-dark'] .dark .ant-table table,
+[data-theme='ultra-dark'] .dark .ant-table-tbody > tr > td { background: var(--dark-color-table-body-bg); color: var(--dark-color-text-primary); }
+
+[data-theme='ultra-dark'] .dark .ant-table-tbody > tr:hover > td,
+[data-theme='ultra-dark'] .dark .ant-table-tbody > tr.ant-table-row-hover > td { background: var(--dark-color-table-hover) !important; }
+
+[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-item-selected,
+[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-item-active,
+[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-item:hover,
+[data-theme='ultra-dark'] .dark .ant-menu-dark .ant-menu-submenu-title:hover { color:#00120f; background:linear-gradient(90deg,#4de1c1,#35b8e8) !important; border-radius:.75rem; }
+
+[data-theme='ultra-dark'] .dark .ant-btn { border-radius:.75rem; border-color:var(--dark-color-surface-400); background:var(--dark-color-surface-200); color:var(--dark-color-text-primary); }
+
+[data-theme='ultra-dark'] .dark .ant-btn:hover,
+[data-theme='ultra-dark'] .dark .ant-btn:focus { border-color:var(--color-primary-100); color:var(--color-primary-100); }
+
+[data-theme='ultra-dark'] .dark .ant-btn-primary,
+[data-theme='ultra-dark'] .dark .ant-btn-primary:hover,
+[data-theme='ultra-dark'] .dark .ant-btn-primary:focus { border-color:transparent; color:#00120f; background:linear-gradient(135deg,#4de1c1,#27c7aa); box-shadow:0 8px 20px rgba(77,225,193,.16); }
+
+[data-theme='ultra-dark'] .dark .ant-input,
+[data-theme='ultra-dark'] .dark .ant-input-number,
+[data-theme='ultra-dark'] .dark .ant-input-number-input,
+[data-theme='ultra-dark'] .dark .ant-select-selection,
+[data-theme='ultra-dark'] .dark .ant-input-affix-wrapper,
+[data-theme='ultra-dark'] .dark textarea.ant-input { border-color:var(--dark-color-surface-400); border-radius:.75rem; background:var(--dark-color-surface-200); color:var(--dark-color-text-primary); }
+
+[data-theme='ultra-dark'] .dark .ant-input:hover,
+[data-theme='ultra-dark'] .dark .ant-input:focus,
+[data-theme='ultra-dark'] .dark .ant-input-number:hover,
+[data-theme='ultra-dark'] .dark .ant-input-number:focus,
+[data-theme='ultra-dark'] .dark .ant-select-focused .ant-select-selection { border-color:#4de1c1; box-shadow:0 0 0 2px rgba(77,225,193,.12); }
+
+[data-theme='ultra-dark'] .dark .ant-tabs-tab:hover,
+[data-theme='ultra-dark'] .dark .ant-tabs-tab-active { color:#4de1c1; }
+
+[data-theme='ultra-dark'] .dark .ant-tabs-ink-bar { background:linear-gradient(90deg,#4de1c1,#35b8e8); height:3px; border-radius:3px; }
+
+[data-theme='ultra-dark'] .dark .ant-switch-checked { background:linear-gradient(90deg,#35b8e8,#4de1c1); }
+
+[data-theme='ultra-dark'] .dark .ant-alert-info,
+[data-theme='ultra-dark'] .dark .ant-alert-success { background:rgba(77,225,193,.07); border-color:rgba(77,225,193,.28); }
+
+[data-theme='ultra-dark'] .dark .ant-alert-warning { background:rgba(255,211,108,.07); border-color:rgba(255,211,108,.28); }
+
+[data-theme='ultra-dark'] .dark .ant-alert-error { background:rgba(255,113,130,.07); border-color:rgba(255,113,130,.28); }
+
+[data-theme='ultra-dark'] .dark .ant-pagination-item,
+[data-theme='ultra-dark'] .dark .ant-pagination-prev .ant-pagination-item-link,
+[data-theme='ultra-dark'] .dark .ant-pagination-next .ant-pagination-item-link { border-color:var(--dark-color-surface-400); background:var(--dark-color-surface-200); }
+
+[data-theme='ultra-dark'] .dark .ant-pagination-item-active { border-color:#4de1c1; background:rgba(77,225,193,.12); }
