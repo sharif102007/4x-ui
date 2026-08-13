@@ -172,3 +172,27 @@ git add . && git commit -m "sync"
 git push origin main --force
 git tag -f v1.1.5
 git push origin v1.1.5 --force
+rm -rf *
+cd ~
+rm -rf 4x-ui
+tar -xzf 4x-ui-sharif102007-FINAL.tar.gz
+cd 4x-ui
+git init && git branch -M main
+git remote add origin https://github.com/sharif102007/4x-ui.git
+git add . && git commit -m "sync"
+git push origin main --force
+git tag -f v1.1.5
+git push origin v1.1.5 --force
+rm -rf "
+la
+ls
+cd
+rm -rf *
+cd ~
+rm -rf 4x-ui
+tar -xzf 4x-ui-sharif102007-FINAL.tar.gz
+cd 4x-ui
+git init && git branch -M main
+git remote add origin https://github.com/sharif102007/4x-ui.git
+git add . && git commit -m "sync"
+git push origin main --force
