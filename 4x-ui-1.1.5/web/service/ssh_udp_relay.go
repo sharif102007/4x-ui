@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -116,8 +118,11 @@ func EnsureBadvpn() error {
 }
 
 // startUdpRelay starts a supervised badvpn-udpgw for the given inbound.
-// Runs as a goroutine, restarts on crash up to 5 times with backoff.
-func startUdpRelay(id, port int) {
+// Runs as a goroutine, restarts on crash up to 10 times with backoff. The
+// caller only gets success after the TCP udpgw endpoint is actually accepting
+// connections, so an unsupported flag or occupied port cannot be reported as
+// a healthy inbound.
+func startUdpRelay(id, port int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	proc := &udpRelayProc{id: id, port: port, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 
@@ -126,6 +131,40 @@ func startUdpRelay(id, port int) {
 	udpRelayMu.Unlock()
 
 	go proc.supervise()
+	if waitUdpRelayReady(proc, 5*time.Second) {
+		return nil
+	}
+	proc.cancel()
+	waitChanWithTimeout(proc.done, "udp relay (failed startup)")
+	return fmt.Errorf("badvpn-udpgw did not listen on 127.0.0.1:%d", port)
+}
+
+func udpRelayReady(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 150*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func waitUdpRelayReady(proc *udpRelayProc, timeout time.Duration) bool {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(75 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if udpRelayReady(proc.port) {
+			return true
+		}
+		select {
+		case <-proc.done:
+			return false
+		case <-deadline.C:
+			return false
+		case <-ticker.C:
+		}
+	}
 }
 
 func (p *udpRelayProc) supervise() {
@@ -183,28 +222,29 @@ func (p *udpRelayProc) run() error {
 	}
 	cmd := exec.CommandContext(p.ctx, udpgwBin, args...)
 	logger.Infof("ssh-manager: udpgw inbound#%d up %s", p.id, addr)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if p.ctx.Err() != nil {
 		return nil // intentional shutdown
+	}
+	if err != nil && stderr.Len() > 0 {
+		return fmt.Errorf("%w: %s", err, stderr.String())
 	}
 	return err
 }
 
 // reconcileUdpRelays starts/stops badvpn-udpgw processes to match desired.
 // desired: map[inboundID]port  (0 = disabled)
-func reconcileUdpRelays(desired map[int]int) {
+func reconcileUdpRelays(desired map[int]int) error {
 	udpRelayMu.Lock()
+	toStop := make([]*udpRelayProc, 0)
 	// Stop relays not in desired or with changed port.
 	for id, proc := range udpRelays {
 		wantPort, ok := desired[id]
-		if !ok || wantPort != proc.port {
+		if !ok || wantPort != proc.port || !udpRelayReady(proc.port) {
 			delete(udpRelays, id)
-			go func(p *udpRelayProc) {
-				p.cancel()
-				// Detached, so this never blocked shutdown - but an unbounded
-				// wait here leaks the goroutine if badvpn ignores cancellation.
-				waitChanWithTimeout(p.done, "udp relay (reconcile)")
-			}(proc)
+			toStop = append(toStop, proc)
 		}
 	}
 	toStart := map[int]int{}
@@ -215,9 +255,16 @@ func reconcileUdpRelays(desired map[int]int) {
 	}
 	udpRelayMu.Unlock()
 
-	for id, port := range toStart {
-		startUdpRelay(id, port)
+	for _, proc := range toStop {
+		proc.cancel()
+		waitChanWithTimeout(proc.done, "udp relay (reconcile)")
 	}
+	for id, port := range toStart {
+		if err := startUdpRelay(id, port); err != nil {
+			return fmt.Errorf("start UDP relay for inbound %d: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // StopAllUdpRelays shuts down every running badvpn-udpgw (called on panel shutdown).

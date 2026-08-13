@@ -48,6 +48,9 @@
   self-signed certificate when its configured identity changes.
 - Keeps the dedicated stunnel service isolated and refuses to mark a TLS
   inbound active when stunnel is unavailable.
+- Verifies that `badvpn-udpgw` is actually listening on its loopback port
+  before reporting UDP relay reconciliation as successful; occupied ports or
+  immediate process crashes now fail and roll the inbound change back.
 
 ## Installer
 

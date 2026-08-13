@@ -300,6 +300,17 @@ func (s *SshManagerService) checkInboundPorts(in *model.SshInbound) error {
 	if !prevSamePublic && !sshSys.portFree(in.ListenPort) {
 		return fmt.Errorf("public port %d is currently in use by another process", in.ListenPort)
 	}
+	if in.UdpRelayPort > 0 {
+		prevSameRelay := false
+		if in.Id > 0 {
+			if cur, err := s.GetInbound(in.Id); err == nil && cur.UdpRelayPort == in.UdpRelayPort && cur.Enable {
+				prevSameRelay = true
+			}
+		}
+		if !prevSameRelay && !sshSys.portFree(in.UdpRelayPort) {
+			return fmt.Errorf("UDP relay port %d is currently in use by another process", in.UdpRelayPort)
+		}
+	}
 	return nil
 }
 
@@ -804,7 +815,9 @@ func (s *SshManagerService) Reconcile() error {
 			return fmt.Errorf("UDP relay is enabled but badvpn is unavailable: %w", err)
 		}
 	}
-	reconcileUdpRelays(udpRelayPorts)
+	if err := reconcileUdpRelays(udpRelayPorts); err != nil {
+		return err
+	}
 
 	logger.Infof("ssh-manager: reconciled (%d ssh ports, %d stunnel svc, %d gateways, %d udpgw)",
 		len(sshdPorts), len(stunnelSvcs), len(desiredGateways), len(udpRelayPorts))

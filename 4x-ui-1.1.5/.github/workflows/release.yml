@@ -70,6 +70,7 @@ jobs:
           grep -Fq 'lport=22' web/service/ssh_system.go
           grep -Fq 's.run(sshdBin, "-T", "-C", sshdTestConnection)' web/service/ssh_system.go
           grep -Fq 'SetNoDelay(true)' web/service/ssh_payload_gateway.go
+          grep -Fq 'waitUdpRelayReady(proc, 5*time.Second)' web/service/ssh_udp_relay.go
           grep -Fq 'shaping policy unchanged and healthy; live qdisc preserved' 4xui-shaper.sh
           grep -Fq 'verify_release_archive' install.sh
           grep -Fq 'verify_release_archive' update.sh
