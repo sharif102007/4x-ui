@@ -30,8 +30,9 @@ var sshSys sshSystem
 // this project are zero-value/stateless and created ad hoc, so the running
 // gateways live in package-level state guarded by a mutex.
 var (
-	sshRuntimeMu sync.Mutex
-	sshGateways  = map[int]*payloadGateway{} // key: inbound ID
+	sshRuntimeMu   sync.Mutex
+	sshReconcileMu sync.Mutex
+	sshGateways    = map[int]*payloadGateway{} // key: inbound ID
 )
 
 // gatewaySpec holds the config needed to start/compare a payload gateway.
@@ -169,6 +170,18 @@ func (s *SshManagerService) validateInbound(in *model.SshInbound) error {
 		default:
 			return errors.New("invalid certificate mode")
 		}
+		if in.Mode == model.SshModeTlsSni {
+			in.GatewayPort = 0
+		} else if in.GatewayPort > 0 {
+			if err := validPort(in.GatewayPort); err != nil {
+				return fmt.Errorf("payload gateway port: %v", err)
+			}
+		}
+	}
+	if in.UdpRelayPort > 0 {
+		if err := validPort(in.UdpRelayPort); err != nil {
+			return fmt.Errorf("UDP relay port: %v", err)
+		}
 	}
 	return nil
 }
@@ -194,6 +207,9 @@ func (s *SshManagerService) collectReservedPorts(excludeInboundID int) map[int]s
 		}
 		if o.GatewayPort > 0 {
 			reserved[o.GatewayPort] = "another SSH inbound gateway (" + o.Name + ")"
+		}
+		if o.UdpRelayPort > 0 {
+			reserved[o.UdpRelayPort] = "another SSH inbound UDP relay (" + o.Name + ")"
 		}
 	}
 
@@ -240,6 +256,7 @@ func (s *SshManagerService) CheckPortConflict(port, excludeInboundID int) error 
 // checkInboundPorts validates all ports an inbound wants to occupy.
 func (s *SshManagerService) checkInboundPorts(in *model.SshInbound) error {
 	reserved := s.collectReservedPorts(in.Id)
+	withinInbound := map[int]string{}
 
 	check := func(p int, label string) error {
 		if p <= 0 {
@@ -248,6 +265,10 @@ func (s *SshManagerService) checkInboundPorts(in *model.SshInbound) error {
 		if reason, clash := reserved[p]; clash {
 			return fmt.Errorf("%s port %d is already used by %s", label, p, reason)
 		}
+		if previous, clash := withinInbound[p]; clash {
+			return fmt.Errorf("%s port %d conflicts with this inbound's %s port", label, p, previous)
+		}
+		withinInbound[p] = label
 		return nil
 	}
 	if err := check(in.ListenPort, "public"); err != nil {
@@ -255,6 +276,16 @@ func (s *SshManagerService) checkInboundPorts(in *model.SshInbound) error {
 	}
 	if in.Mode != model.SshModeNormal {
 		if err := check(in.BackendSshPort, "backend"); err != nil {
+			return err
+		}
+	}
+	if in.GatewayPort > 0 {
+		if err := check(in.GatewayPort, "gateway"); err != nil {
+			return err
+		}
+	}
+	if in.UdpRelayPort > 0 {
+		if err := check(in.UdpRelayPort, "UDP relay"); err != nil {
 			return err
 		}
 	}
@@ -270,6 +301,25 @@ func (s *SshManagerService) checkInboundPorts(in *model.SshInbound) error {
 		return fmt.Errorf("public port %d is currently in use by another process", in.ListenPort)
 	}
 	return nil
+}
+
+func (s *SshManagerService) allocateGatewayPort(in *model.SshInbound) (int, error) {
+	reserved := s.collectReservedPorts(in.Id)
+	for _, port := range []int{in.ListenPort, in.BackendSshPort, in.UdpRelayPort} {
+		if port > 0 {
+			reserved[port] = "this inbound"
+		}
+	}
+	for attempt := 0; attempt < 32; attempt++ {
+		port, err := sshSys.freeLocalPort()
+		if err != nil {
+			return 0, err
+		}
+		if _, clash := reserved[port]; !clash {
+			return port, nil
+		}
+	}
+	return 0, errors.New("could not allocate a unique payload gateway port")
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +350,7 @@ func (s *SshManagerService) AddInbound(in *model.SshInbound) (*model.SshInbound,
 	}
 	// Auto-assign a loopback gateway port for payload mode.
 	if in.Mode == model.SshModeTlsPayload && in.GatewayPort == 0 {
-		gp, err := sshSys.freeLocalPort()
+		gp, err := s.allocateGatewayPort(in)
 		if err != nil {
 			return nil, err
 		}
@@ -312,7 +362,12 @@ func (s *SshManagerService) AddInbound(in *model.SshInbound) (*model.SshInbound,
 	}
 	logger.Infof("ssh-manager: inbound created id=%d name=%q mode=%s port=%d", in.Id, in.Name, in.Mode, in.ListenPort)
 	if err := s.Reconcile(); err != nil {
-		return in, err
+		rollbackErr := database.GetDB().Delete(&model.SshInbound{}, in.Id).Error
+		restoreErr := s.Reconcile()
+		if rollbackErr != nil || restoreErr != nil {
+			return nil, fmt.Errorf("create reconcile failed: %v; database rollback: %v; live rollback: %v", err, rollbackErr, restoreErr)
+		}
+		return nil, fmt.Errorf("create reconcile failed; inbound rolled back: %v", err)
 	}
 	return in, nil
 }
@@ -333,7 +388,7 @@ func (s *SshManagerService) UpdateInbound(in *model.SshInbound) (*model.SshInbou
 			if cur.GatewayPort != 0 {
 				in.GatewayPort = cur.GatewayPort
 			} else {
-				gp, err := sshSys.freeLocalPort()
+				gp, err := s.allocateGatewayPort(in)
 				if err != nil {
 					return nil, err
 				}
@@ -349,25 +404,58 @@ func (s *SshManagerService) UpdateInbound(in *model.SshInbound) (*model.SshInbou
 	}
 	logger.Infof("ssh-manager: inbound updated id=%d name=%q mode=%s port=%d", in.Id, in.Name, in.Mode, in.ListenPort)
 	if err := s.Reconcile(); err != nil {
-		return in, err
+		rollbackErr := database.GetDB().Save(cur).Error
+		restoreErr := s.Reconcile()
+		if rollbackErr != nil || restoreErr != nil {
+			return nil, fmt.Errorf("update reconcile failed: %v; database rollback: %v; live rollback: %v", err, rollbackErr, restoreErr)
+		}
+		return nil, fmt.Errorf("update reconcile failed; previous inbound restored: %v", err)
 	}
 	return in, nil
 }
 
 func (s *SshManagerService) DelInbound(id int) error {
+	cur, err := s.GetInbound(id)
+	if err != nil {
+		return errors.New("inbound not found")
+	}
 	if err := database.GetDB().Delete(&model.SshInbound{}, id).Error; err != nil {
 		return err
 	}
 	logger.Infof("ssh-manager: inbound deleted id=%d", id)
-	return s.Reconcile()
+	if err := s.Reconcile(); err != nil {
+		// Keep the database and live host consistent when OpenSSH/stunnel rejects
+		// a new configuration. Restore the row with its original primary key.
+		if restoreErr := database.GetDB().Create(cur).Error; restoreErr != nil {
+			return fmt.Errorf("delete reconcile failed: %v; database rollback failed: %v", err, restoreErr)
+		}
+		_ = s.Reconcile()
+		return fmt.Errorf("delete reconcile failed; inbound restored: %v", err)
+	}
+	return nil
 }
 
 func (s *SshManagerService) SetInboundEnable(id int, enable bool) error {
+	cur, err := s.GetInbound(id)
+	if err != nil {
+		return errors.New("inbound not found")
+	}
+	if cur.Enable == enable {
+		return nil
+	}
 	if err := database.GetDB().Model(&model.SshInbound{}).Where("id = ?", id).Update("enable", enable).Error; err != nil {
 		return err
 	}
 	logger.Infof("ssh-manager: inbound id=%d enable=%v", id, enable)
-	return s.Reconcile()
+	if err := s.Reconcile(); err != nil {
+		rollbackErr := database.GetDB().Model(&model.SshInbound{}).Where("id = ?", id).Update("enable", cur.Enable).Error
+		restoreErr := s.Reconcile()
+		if rollbackErr != nil || restoreErr != nil {
+			return fmt.Errorf("enable reconcile failed: %v; database rollback: %v; live rollback: %v", err, rollbackErr, restoreErr)
+		}
+		return fmt.Errorf("enable reconcile failed; previous state restored: %v", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -402,9 +490,15 @@ func (s *SshManagerService) AddUser(u *model.SshUser) error {
 	if err := validPassword(u.Password); err != nil {
 		return err
 	}
+	enc, err := s.encryptPassword(u.Password)
+	if err != nil {
+		return err
+	}
 	// DB uniqueness
 	var count int64
-	database.GetDB().Model(&model.SshUser{}).Where("username = ?", u.Username).Count(&count)
+	if err := database.GetDB().Model(&model.SshUser{}).Where("username = ?", u.Username).Count(&count).Error; err != nil {
+		return err
+	}
 	if count > 0 {
 		return errors.New("a managed user with that name already exists")
 	}
@@ -418,19 +512,23 @@ func (s *SshManagerService) AddUser(u *model.SshUser) error {
 	if err := sshSys.createUser(u.Username); err != nil {
 		return err
 	}
+	createdSystemUser := true
+	defer func() {
+		if createdSystemUser {
+			_ = sshSys.deleteUser(u.Username)
+		}
+	}()
 	if err := sshSys.setPassword(u.Username, u.Password); err != nil {
-		_ = sshSys.deleteUser(u.Username) // roll back the half-created account
 		return err
 	}
 	if !u.Enable {
-		_ = sshSys.lockUser(u.Username)
+		if err := sshSys.lockUser(u.Username); err != nil {
+			return err
+		}
 	} else {
-		sshSys.setExpiry(u.Username, msToChageDate(u.ExpiryTime))
-	}
-
-	enc, err := s.encryptPassword(u.Password)
-	if err != nil {
-		return err
+		if err := sshSys.setExpiry(u.Username, msToChageDate(u.ExpiryTime)); err != nil {
+			return err
+		}
 	}
 	row := model.SshUser{
 		Username: u.Username, PasswordEnc: enc, Enable: u.Enable, ExpiryTime: u.ExpiryTime, Note: u.Note,
@@ -440,6 +538,7 @@ func (s *SshManagerService) AddUser(u *model.SshUser) error {
 	if err := database.GetDB().Create(&row).Error; err != nil {
 		return err
 	}
+	createdSystemUser = false
 	u.Id = row.Id
 	logger.Infof("ssh-manager: user created %q (enabled=%v)", u.Username, u.Enable)
 	return nil
@@ -456,18 +555,25 @@ func (s *SshManagerService) UpdateUser(u *model.SshUser) error {
 	if isProtectedUser(cur.Username) {
 		return errors.New("refusing to manage a protected system user")
 	}
+	if !sshSys.userExists(cur.Username) {
+		return errors.New("managed system user is missing")
+	}
 	// Guard: only ever touch accounts that are members of our group.
-	if sshSys.userExists(cur.Username) && !sshSys.inManagedGroup(cur.Username) {
+	if !sshSys.inManagedGroup(cur.Username) {
 		return errors.New("system user is not managed by the panel (not in " + sshUsersGroup + ")")
 	}
 
-	// Password change is optional on edit.
-	if strings.TrimSpace(u.Password) != "" {
+	original := *cur
+	passwordChanged := strings.TrimSpace(u.Password) != ""
+	oldPassword := ""
+	if passwordChanged {
 		if err := validPassword(u.Password); err != nil {
 			return err
 		}
-		if err := sshSys.setPassword(cur.Username, u.Password); err != nil {
-			return err
+		var err error
+		oldPassword, err = s.decryptPassword(original.PasswordEnc)
+		if err != nil || oldPassword == "" {
+			return errors.New("cannot safely change password because the stored password cannot be decrypted")
 		}
 		enc, err := s.encryptPassword(u.Password)
 		if err != nil {
@@ -485,18 +591,37 @@ func (s *SshManagerService) UpdateUser(u *model.SshUser) error {
 	cur.DownloadMbps = u.DownloadMbps
 	cur.UploadMbps = u.UploadMbps
 
-	if u.Enable {
-		if err := sshSys.unlockUser(cur.Username, msToChageDate(u.ExpiryTime)); err != nil {
-			return err
-		}
-	} else {
-		if err := sshSys.lockUser(cur.Username); err != nil {
-			return err
-		}
-	}
-
 	if err := database.GetDB().Save(cur).Error; err != nil {
 		return err
+	}
+
+	applyErr := error(nil)
+	if passwordChanged {
+		applyErr = sshSys.setPassword(cur.Username, u.Password)
+	}
+	if applyErr == nil {
+		if u.Enable {
+			applyErr = sshSys.unlockUser(cur.Username, msToChageDate(u.ExpiryTime))
+		} else {
+			applyErr = sshSys.lockUser(cur.Username)
+		}
+	}
+	if applyErr != nil {
+		dbRollbackErr := database.GetDB().Save(&original).Error
+		var passwordRollbackErr error
+		if passwordChanged {
+			passwordRollbackErr = sshSys.setPassword(original.Username, oldPassword)
+		}
+		var stateRollbackErr error
+		if original.Enable {
+			stateRollbackErr = sshSys.unlockUser(original.Username, msToChageDate(original.ExpiryTime))
+		} else {
+			stateRollbackErr = sshSys.lockUser(original.Username)
+		}
+		if dbRollbackErr != nil || passwordRollbackErr != nil || stateRollbackErr != nil {
+			return fmt.Errorf("apply system user update failed: %v; database rollback: %v; password rollback: %v; state rollback: %v", applyErr, dbRollbackErr, passwordRollbackErr, stateRollbackErr)
+		}
+		return fmt.Errorf("apply system user update failed; previous state restored: %v", applyErr)
 	}
 	logger.Infof("ssh-manager: user updated %q (enabled=%v)", cur.Username, cur.Enable)
 	return nil
@@ -513,6 +638,9 @@ func (s *SshManagerService) SetUserEnable(id int, enable bool) error {
 	if sshSys.userExists(cur.Username) && !sshSys.inManagedGroup(cur.Username) {
 		return errors.New("system user is not managed by the panel")
 	}
+	if cur.Enable == enable {
+		return nil
+	}
 	if enable {
 		if err := sshSys.unlockUser(cur.Username, msToChageDate(cur.ExpiryTime)); err != nil {
 			return err
@@ -523,6 +651,11 @@ func (s *SshManagerService) SetUserEnable(id int, enable bool) error {
 		}
 	}
 	if err := database.GetDB().Model(&model.SshUser{}).Where("id = ?", id).Update("enable", enable).Error; err != nil {
+		if cur.Enable {
+			_ = sshSys.unlockUser(cur.Username, msToChageDate(cur.ExpiryTime))
+		} else {
+			_ = sshSys.lockUser(cur.Username)
+		}
 		return err
 	}
 	logger.Infof("ssh-manager: user id=%d enable=%v", id, enable)
@@ -537,17 +670,22 @@ func (s *SshManagerService) DelUser(id int) error {
 	if isProtectedUser(cur.Username) {
 		return errors.New("refusing to delete a protected system user")
 	}
-	// Only delete the OS account if it is one of ours.
+	// Verify ownership before changing either side.
 	if sshSys.userExists(cur.Username) {
 		if !sshSys.inManagedGroup(cur.Username) {
 			return errors.New("system user is not managed by the panel; not deleting")
 		}
-		if err := sshSys.deleteUser(cur.Username); err != nil {
-			return err
-		}
 	}
 	if err := database.GetDB().Delete(&model.SshUser{}, id).Error; err != nil {
 		return err
+	}
+	if sshSys.userExists(cur.Username) {
+		if err := sshSys.deleteUser(cur.Username); err != nil {
+			if restoreErr := database.GetDB().Create(cur).Error; restoreErr != nil {
+				return fmt.Errorf("delete system user failed: %v; database rollback failed: %v", err, restoreErr)
+			}
+			return fmt.Errorf("delete system user failed; database row restored: %v", err)
+		}
 	}
 	logger.Infof("ssh-manager: user deleted %q", cur.Username)
 	return nil
@@ -558,6 +696,9 @@ func (s *SshManagerService) DelUser(id int) error {
 // ---------------------------------------------------------------------------
 
 func (s *SshManagerService) Reconcile() error {
+	sshReconcileMu.Lock()
+	defer sshReconcileMu.Unlock()
+
 	inbounds, err := s.GetInbounds()
 	if err != nil {
 		return err
@@ -577,7 +718,11 @@ func (s *SshManagerService) Reconcile() error {
 		// Persist an optional banner and map it to the sshd-side port the
 		// client's session actually lands on.
 		if strings.TrimSpace(in.Banner) != "" {
-			if bp, err := sshSys.writeBanner(in.Id, in.Banner); err == nil && bp != "" {
+			bp, bannerErr := sshSys.writeBanner(in.Id, in.Banner)
+			if bannerErr != nil {
+				return fmt.Errorf("persist banner for inbound %d: %w", in.Id, bannerErr)
+			}
+			if bp != "" {
 				sshdLocalPort := in.ListenPort
 				if in.Mode != model.SshModeNormal {
 					sshdLocalPort = in.BackendSshPort
@@ -599,8 +744,7 @@ func (s *SshManagerService) Reconcile() error {
 			sshdPorts = append(sshdPorts, in.BackendSshPort)
 			cf, kf, cerr := s.resolveCert(&in)
 			if cerr != nil {
-				logger.Warningf("ssh-manager: inbound %d cert error: %v", in.Id, cerr)
-				continue
+				return fmt.Errorf("inbound %d certificate: %w", in.Id, cerr)
 			}
 			stunnelSvcs = append(stunnelSvcs, stunnelSvc{
 				Name:        fmt.Sprintf("svc-%d", in.Id),
@@ -615,8 +759,7 @@ func (s *SshManagerService) Reconcile() error {
 			sshdPorts = append(sshdPorts, in.BackendSshPort)
 			cf, kf, cerr := s.resolveCert(&in)
 			if cerr != nil {
-				logger.Warningf("ssh-manager: inbound %d cert error: %v", in.Id, cerr)
-				continue
+				return fmt.Errorf("inbound %d certificate: %w", in.Id, cerr)
 			}
 			stunnelSvcs = append(stunnelSvcs, stunnelSvc{
 				Name:        fmt.Sprintf("svc-%d", in.Id),
@@ -642,11 +785,13 @@ func (s *SshManagerService) Reconcile() error {
 	}
 
 	// 2) Payload gateways: start desired, stop the rest.
-	s.reconcileGateways(desiredGateways)
+	if err := s.reconcileGateways(desiredGateways); err != nil {
+		return err
+	}
 
 	// 3) stunnel services.
 	if len(stunnelSvcs) > 0 && !sshSys.stunnelInstalled() {
-		logger.Warning("ssh-manager: TLS inbound(s) enabled but stunnel is not installed; run: apt-get install -y stunnel4")
+		return errors.New("TLS inbound requires stunnel (install stunnel4)")
 	} else {
 		if err := sshSys.writeStunnel(stunnelSvcs); err != nil {
 			return err
@@ -656,8 +801,7 @@ func (s *SshManagerService) Reconcile() error {
 	// 4) UDP relay (badvpn-udpgw) — install if needed, then reconcile.
 	if len(udpRelayPorts) > 0 {
 		if err := EnsureBadvpn(); err != nil {
-			logger.Warning("ssh-manager: badvpn not available — UDP relay disabled:", err)
-			udpRelayPorts = map[int]int{} // clear so existing relays are stopped
+			return fmt.Errorf("UDP relay is enabled but badvpn is unavailable: %w", err)
 		}
 	}
 	reconcileUdpRelays(udpRelayPorts)
@@ -667,7 +811,7 @@ func (s *SshManagerService) Reconcile() error {
 	return nil
 }
 
-func (s *SshManagerService) reconcileGateways(desired map[int]gatewaySpec) {
+func (s *SshManagerService) reconcileGateways(desired map[int]gatewaySpec) error {
 	sshRuntimeMu.Lock()
 	defer sshRuntimeMu.Unlock()
 
@@ -679,6 +823,7 @@ func (s *SshManagerService) reconcileGateways(desired map[int]gatewaySpec) {
 			delete(sshGateways, id)
 		}
 	}
+	var firstErr error
 	// Start newly desired gateways.
 	for id, spec := range desired {
 		if _, running := sshGateways[id]; running {
@@ -687,10 +832,14 @@ func (s *SshManagerService) reconcileGateways(desired map[int]gatewaySpec) {
 		g := newPayloadGateway(id, spec.bindIP, spec.listen, spec.backend)
 		if err := g.start(); err != nil {
 			logger.Warningf("ssh-manager: gateway start failed for inbound %d: %v", id, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("payload gateway for inbound %d: %w", id, err)
+			}
 			continue
 		}
 		sshGateways[id] = g
 	}
+	return firstErr
 }
 
 func (s *SshManagerService) resolveCert(in *model.SshInbound) (string, string, error) {

@@ -23,6 +23,14 @@ func shaperStateDir() string {
 	return "/run/4xui-shaper"
 }
 
+func shaperRateStateExists(scope string) bool {
+	if scope != "ssh" && scope != "xray" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(shaperStateDir(), scope+".limits"))
+	return err == nil && info.Mode().IsRegular()
+}
+
 // writeShaperRateState atomically publishes one subsystem's desired queue
 // rates. Keeping SSH and Xray in separate files lets either policy change
 // without losing the other subsystem's rates. The nftables policer remains the

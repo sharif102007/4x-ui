@@ -317,10 +317,16 @@ func applyXraySpeedPolicy(limits []xrayBandwidthLimit) error {
 	xrayPolicyMu.Lock()
 	defer xrayPolicyMu.Unlock()
 	if len(limits) == 0 {
-		if xrayPolicySignature != "" {
-			_ = exec.Command("nft", "delete", "table", "inet", xrayNftTable).Run()
-			xrayPolicySignature = ""
+		// nftables survives a panel restart. Always remove a stale policy when
+		// the database has no limits; the in-memory signature starts empty and
+		// therefore cannot be used to decide whether the table exists.
+		if nftTableExists(xrayNftTable) {
+			out, err := exec.Command("nft", "delete", "table", "inet", xrayNftTable).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("remove stale Xray speed policy: %w: %s", err, strings.TrimSpace(string(out)))
+			}
 		}
+		xrayPolicySignature = ""
 		if err := writeShaperRateState("xray", nil); err != nil {
 			return fmt.Errorf("write empty Xray shaper state: %w", err)
 		}
@@ -328,10 +334,17 @@ func applyXraySpeedPolicy(limits []xrayBandwidthLimit) error {
 		return nil
 	}
 	sig, script := buildXrayPolicy(limits)
+	rates := xrayShaperRates(limits)
 	if sig == xrayPolicySignature {
 		// A firewall reload can remove the table while the panel process is
 		// still alive. Verify it exists before trusting the in-memory cache.
-		if err := exec.Command("nft", "list", "table", "inet", xrayNftTable).Run(); err == nil {
+		if nftTableExists(xrayNftTable) {
+			// /run may be cleaned independently. Republish the desired queue state
+			// even when the nft policy itself did not change.
+			if err := writeShaperRateState("xray", rates); err != nil {
+				return fmt.Errorf("refresh Xray shaper state: %w", err)
+			}
+			setXraySpeedLimitPresence(true)
 			return nil
 		}
 	}
@@ -348,6 +361,16 @@ func applyXraySpeedPolicy(limits []xrayBandwidthLimit) error {
 		}
 		logger.Warning("xray: nftables socket-mark expression unavailable; using kernel mark propagation fallback")
 	}
+	if err := writeShaperRateState("xray", rates); err != nil {
+		return fmt.Errorf("write Xray shaper state: %w", err)
+	}
+	xrayPolicySignature = sig
+	logger.Infof("xray: applied speed policy for %d clients", len(limits))
+	setXraySpeedLimitPresence(true)
+	return nil
+}
+
+func xrayShaperRates(limits []xrayBandwidthLimit) []shaperRate {
 	rates := make([]shaperRate, 0, len(limits))
 	for _, limit := range limits {
 		rates = append(rates, shaperRate{
@@ -356,11 +379,5 @@ func applyXraySpeedPolicy(limits []xrayBandwidthLimit) error {
 			DownBits: int64(limit.DownloadMbps) * 1000 * 1000,
 		})
 	}
-	if err := writeShaperRateState("xray", rates); err != nil {
-		return fmt.Errorf("write Xray shaper state: %w", err)
-	}
-	xrayPolicySignature = sig
-	logger.Infof("xray: applied speed policy for %d clients", len(limits))
-	setXraySpeedLimitPresence(true)
-	return nil
+	return rates
 }

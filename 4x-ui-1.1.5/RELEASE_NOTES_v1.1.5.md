@@ -14,6 +14,9 @@
   systemd unit are unchanged.
 - Keeps the dedicated `xui-stunnel.service`; Debian's global
   `stunnel4.service` is not used by the panel.
+- Moves the dedicated config outside `/etc/stunnel/*.conf`, preventing
+  Debian's global daemon from loading the same listeners and causing
+  `Address already in use` failures.
 - Stops rebuilding a healthy HTB/IFB tree when the effective rate policy has
   not changed.
 - Removes nftables drop-policer verdicts atomically after HTB/IFB is healthy,
@@ -29,6 +32,22 @@
   to avoid periodic process/DB spikes on small VPS hosts.
 - A failed SSH counter read no longer resets the accounting baseline and
   double-counts traffic on the next poll.
+- Recreates deleted nftables tables and missing queue-state files after a
+  firewall reload or service restart instead of silently leaving limits off.
+- Publishes the latest Xray limit enforcement result in the server status API.
+
+## SSH Manager reliability
+
+- Tests the effective OpenSSH configuration with a complete `Match LocalPort`
+  connection specification, fixing inbound delete/update failures on hosts
+  with per-port banners.
+- Serializes host reconciliation and rolls database changes back when sshd,
+  stunnel, payload gateway, UDP relay, certificate, or user operations fail.
+- Detects listen/backend/gateway/UDP port collisions before applying changes.
+- Generates correct DNS or IP certificate SANs and regenerates a stale
+  self-signed certificate when its configured identity changes.
+- Keeps the dedicated stunnel service isolated and refuses to mark a TLS
+  inbound active when stunnel is unavailable.
 
 ## Installer
 
@@ -41,10 +60,15 @@
 - Installs stunnel with the other SSH Manager runtime dependencies.
 - Supports Linux x86_64/amd64 only; the same release archive is used on Debian,
   Ubuntu, and AlmaLinux.
+- Verifies the published SHA-256 and required archive paths before stopping or
+  replacing an installed panel.
+- Installs the CLI bundled in the same release archive, avoiding a mismatch
+  between a tagged binary and the `main` branch script.
 
 ## GitHub Actions
 
-- Builds and releases only `x-ui-linux-amd64.tar.gz` plus its SHA-256 file.
+- Builds `x-ui-linux-amd64.tar.gz` plus its SHA-256 file and the Windows amd64
+  package.
 - Builds Docker images only for `linux/amd64`; QEMU and unused architecture
   builds are removed.
 - Uses the latest supported major releases of checkout/setup-go and Go 1.26.5.
@@ -63,6 +87,10 @@
   response before the service stops.
 - Bounds nftables counter reads so shutdown cannot wait forever on the helper
   process.
+- Makes inbound/client create, update, and delete transactions report commit
+  failures before attempting an incremental Xray runtime sync.
+- Prevents malformed client JSON from panicking common add, update, and delete
+  paths.
 
 ## Repository cleanup
 

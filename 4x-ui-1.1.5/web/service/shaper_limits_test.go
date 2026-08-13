@@ -39,3 +39,20 @@ func TestWriteShaperRateStateRejectsUnknownScope(t *testing.T) {
 		t.Fatal("unknown scope was accepted")
 	}
 }
+
+func TestShaperRateStateExists(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XUI_SHAPER_STATE_DIR", dir)
+	if shaperRateStateExists("ssh") {
+		t.Fatal("missing state file reported as present")
+	}
+	if err := writeShaperRateState("ssh", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !shaperRateStateExists("ssh") {
+		t.Fatal("published state file was not detected")
+	}
+	if shaperRateStateExists("invalid") {
+		t.Fatal("invalid scope reported as present")
+	}
+}

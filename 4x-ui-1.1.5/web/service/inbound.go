@@ -293,22 +293,23 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 
 	db := database.GetDB()
 	tx := db.Begin()
-	defer func() {
-		if err == nil {
-			tx.Commit()
-		} else {
-			tx.Rollback()
-		}
-	}()
+	if tx.Error != nil {
+		return inbound, false, tx.Error
+	}
+	defer tx.Rollback()
 
 	err = tx.Save(inbound).Error
-	if err == nil {
-		if len(inbound.ClientStats) == 0 {
-			for _, client := range clients {
-				s.AddClientStat(tx, inbound.Id, &client)
+	if err != nil {
+		return inbound, false, err
+	}
+	if len(inbound.ClientStats) == 0 {
+		for i := range clients {
+			if err := s.AddClientStat(tx, inbound.Id, &clients[i]); err != nil {
+				return inbound, false, err
 			}
 		}
-	} else {
+	}
+	if err := tx.Commit().Error; err != nil {
 		return inbound, false, err
 	}
 
@@ -340,29 +341,6 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 // Returns whether Xray needs restart and any error.
 func (s *InboundService) DelInbound(id int) (bool, error) {
 	db := database.GetDB()
-
-	var tag string
-	needRestart := false
-	result := db.Model(model.Inbound{}).Select("tag").Where("id = ? and enable = ?", id, true).First(&tag)
-	if result.Error == nil {
-		s.xrayApi.Init(p.GetAPIPort())
-		err1 := s.xrayApi.DelInbound(tag)
-		if err1 == nil {
-			logger.Debug("Inbound deleted by api:", tag)
-		} else {
-			logger.Debug("Unable to delete inbound by api:", err1)
-			needRestart = true
-		}
-		s.xrayApi.Close()
-	} else {
-		logger.Debug("No enabled inbound founded to removing by api", tag)
-	}
-
-	// Delete client traffics of inbounds
-	err := db.Where("inbound_id = ?", id).Delete(xray.ClientTraffic{}).Error
-	if err != nil {
-		return false, err
-	}
 	inbound, err := s.GetInbound(id)
 	if err != nil {
 		return false, err
@@ -371,6 +349,20 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			tx.Rollback()
+		}
+	}()
+	if err := tx.Where("inbound_id = ?", id).Delete(xray.ClientTraffic{}).Error; err != nil {
+		return false, err
+	}
+
 	// Bulk-delete client IPs for every email in this inbound. The previous
 	// per-client loop fired one DELETE per row — at 7k+ clients that meant
 	// thousands of synchronous SQL roundtrips and a multi-second freeze.
@@ -383,14 +375,32 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 			}
 		}
 		for _, batch := range chunkStrings(uniqueNonEmptyStrings(emails), sqliteMaxVars) {
-			if err := db.Where("client_email IN ?", batch).
+			if err := tx.Where("client_email IN ?", batch).
 				Delete(model.InboundClientIps{}).Error; err != nil {
 				return false, err
 			}
 		}
 	}
+	if err := tx.Delete(model.Inbound{}, id).Error; err != nil {
+		return false, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return false, err
+	}
+	rollback = false
 
-	return needRestart, db.Delete(model.Inbound{}, id).Error
+	needRestart := false
+	if inbound.Enable {
+		s.xrayApi.Init(p.GetAPIPort())
+		if err := s.xrayApi.DelInbound(inbound.Tag); err == nil {
+			logger.Debug("Inbound deleted by api:", inbound.Tag)
+		} else {
+			logger.Debug("Unable to delete inbound by api:", err)
+			needRestart = true
+		}
+		s.xrayApi.Close()
+	}
+	return needRestart, nil
 }
 
 func (s *InboundService) GetInbound(id int) (*model.Inbound, error) {
@@ -488,14 +498,10 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 
 	db := database.GetDB()
 	tx := db.Begin()
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		} else {
-			tx.Commit()
-		}
-	}()
+	if tx.Error != nil {
+		return inbound, false, tx.Error
+	}
+	defer tx.Rollback()
 
 	err = s.updateClientTraffics(tx, oldInbound, inbound)
 	if err != nil {
@@ -579,6 +585,12 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	} else {
 		oldInbound.Tag = fmt.Sprintf("inbound-%v:%v", inbound.Listen, inbound.Port)
 	}
+	if err := tx.Save(oldInbound).Error; err != nil {
+		return inbound, false, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return inbound, false, err
+	}
 
 	needRestart := false
 	if speedPolicyChanged {
@@ -591,7 +603,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		logger.Debug("Old inbound deleted by api:", tag)
 	}
 	if inbound.Enable {
-		runtimeInbound, err2 := s.buildRuntimeInboundForAPI(tx, oldInbound)
+		runtimeInbound, err2 := s.buildRuntimeInboundForAPI(db, oldInbound)
 		if err2 != nil {
 			logger.Debug("Unable to prepare runtime inbound config:", err2)
 			needRestart = true
@@ -615,7 +627,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 
 	openInboundFirewall(oldInbound)
 
-	return inbound, needRestart, tx.Save(oldInbound).Error
+	return inbound, needRestart, nil
 }
 
 func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.Inbound) (*model.Inbound, error) {
@@ -751,7 +763,10 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 		return false, err
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, ok := settings["clients"].([]any)
+	if !ok || len(interfaceClients) == 0 {
+		return false, common.NewError("clients payload is empty or invalid")
+	}
 	// Add timestamps for new clients being appended
 	nowTs := time.Now().Unix() * 1000
 	for i := range interfaceClients {
@@ -804,7 +819,10 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 		return false, err
 	}
 
-	oldClients := oldSettings["clients"].([]any)
+	oldClients, ok := oldSettings["clients"].([]any)
+	if !ok {
+		return false, common.NewError("stored inbound clients are invalid")
+	}
 	oldClients = append(oldClients, interfaceClients...)
 
 	oldSettings["clients"] = oldClients
@@ -818,14 +836,10 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 
 	db := database.GetDB()
 	tx := db.Begin()
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		} else {
-			tx.Commit()
-		}
-	}()
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	defer tx.Rollback()
 
 	needRestart := false
 	// Speed-limited clients are represented by generated Xray outbounds and
@@ -838,14 +852,34 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 			break
 		}
 	}
-	s.xrayApi.Init(p.GetAPIPort())
-	for _, client := range clients {
+	for i := range clients {
+		client := &clients[i]
 		if len(client.Email) > 0 {
-			s.AddClientStat(tx, data.Id, &client)
+			if err := s.AddClientStat(tx, data.Id, client); err != nil {
+				return false, err
+			}
+		}
+	}
+	if err := tx.Save(oldInbound).Error; err != nil {
+		return false, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return false, err
+	}
+
+	s.xrayApi.Init(p.GetAPIPort())
+	for i := range clients {
+		client := &clients[i]
+		if len(client.Email) > 0 {
 			if client.Enable {
 				cipher := ""
 				if oldInbound.Protocol == "shadowsocks" {
-					cipher = oldSettings["method"].(string)
+					var valid bool
+					cipher, valid = oldSettings["method"].(string)
+					if !valid || cipher == "" {
+						needRestart = true
+						continue
+					}
 				}
 				err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
 					"email":    client.Email,
@@ -869,7 +903,7 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 	}
 	s.xrayApi.Close()
 
-	return needRestart, tx.Save(oldInbound).Error
+	return needRestart, nil
 }
 
 func (s *InboundService) getClientPrimaryKey(protocol model.Protocol, client model.Client) string {
@@ -1112,15 +1146,24 @@ func (s *InboundService) DelInboundClient(inboundId int, clientId string) (bool,
 		client_key = "auth"
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, ok := settings["clients"].([]any)
+	if !ok {
+		return false, common.NewError("stored inbound clients are invalid")
+	}
 	var newClients []any
 	needApiDel := false
 	clientFound := false
 	removedSpeedLimit := false
 	for _, client := range interfaceClients {
-		c := client.(map[string]any)
-		c_id := c[client_key].(string)
-		if c_id == clientId {
+		c, ok := client.(map[string]any)
+		if !ok {
+			return false, common.NewError("stored inbound client entry is invalid")
+		}
+		cID, ok := c[client_key].(string)
+		if !ok || cID == "" {
+			return false, common.NewError("stored inbound client ID is invalid")
+		}
+		if cID == clientId {
 			clientFound = true
 			email, _ = c["email"].(string)
 			needApiDel, _ = c["enable"].(bool)
@@ -1198,6 +1241,9 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	if err != nil {
 		return false, err
 	}
+	if len(clients) != 1 {
+		return false, common.NewError("exactly one client is required for update")
+	}
 
 	var settings map[string]any
 	err = json.Unmarshal([]byte(data.Settings), &settings)
@@ -1205,7 +1251,10 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		return false, err
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, ok := settings["clients"].([]any)
+	if !ok || len(interfaceClients) != 1 {
+		return false, common.NewError("exactly one valid client payload is required")
+	}
 
 	oldInbound, err := s.GetInbound(data.Id)
 	if err != nil {
@@ -1263,7 +1312,10 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	if err != nil {
 		return false, err
 	}
-	settingsClients := oldSettings["clients"].([]any)
+	settingsClients, ok := oldSettings["clients"].([]any)
+	if !ok || clientIndex >= len(settingsClients) {
+		return false, common.NewError("stored inbound clients are invalid")
+	}
 	// Preserve created_at and set updated_at for the replacing client
 	var preservedCreated any
 	if clientIndex >= 0 && clientIndex < len(settingsClients) {
@@ -1306,14 +1358,10 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	oldInbound.Settings = string(newSettings)
 	db := database.GetDB()
 	tx := db.Begin()
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		} else {
-			tx.Commit()
-		}
-	}()
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	defer tx.Rollback()
 
 	if len(clients[0].Email) > 0 {
 		if len(oldEmail) > 0 {
@@ -1326,7 +1374,9 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 				return false, err
 			}
 		} else {
-			s.AddClientStat(tx, data.Id, &clients[0])
+			if err = s.AddClientStat(tx, data.Id, &clients[0]); err != nil {
+				return false, err
+			}
 		}
 	} else {
 		err = s.DelClientStat(tx, oldEmail)
@@ -1348,6 +1398,12 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		// outbounds/routes. Force the normal config rebuild for these changes.
 		needRestart = true
 	}
+	if err := tx.Save(oldInbound).Error; err != nil {
+		return false, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return false, err
+	}
 	if len(oldEmail) > 0 {
 		s.xrayApi.Init(p.GetAPIPort())
 		if oldClients[clientIndex].Enable {
@@ -1366,7 +1422,14 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		if clients[0].Enable {
 			cipher := ""
 			if oldInbound.Protocol == "shadowsocks" {
-				cipher = oldSettings["method"].(string)
+				var valid bool
+				cipher, valid = oldSettings["method"].(string)
+				if !valid || cipher == "" {
+					logger.Debug("Invalid shadowsocks method in stored inbound settings")
+					needRestart = true
+					s.xrayApi.Close()
+					return needRestart, nil
+				}
 			}
 			err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
 				"email":    clients[0].Email,
@@ -1389,7 +1452,7 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		logger.Debug("Client old email not found")
 		needRestart = true
 	}
-	return needRestart, tx.Save(oldInbound).Error
+	return needRestart, nil
 }
 
 func (s *InboundService) AddTraffic(inboundTraffics []*xray.Traffic, clientTraffics []*xray.ClientTraffic) (bool, bool, error) {

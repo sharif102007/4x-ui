@@ -15,6 +15,10 @@ import (
 //go:embed version
 var version string
 
+// buildVersion is set by release builds through -ldflags. Local builds fall
+// back to the embedded config/version file below.
+var buildVersion string
+
 //go:embed name
 var name string
 
@@ -32,6 +36,9 @@ const (
 
 // GetVersion returns the version string of the 4x-ui application.
 func GetVersion() string {
+	if releaseVersion := strings.TrimSpace(buildVersion); releaseVersion != "" {
+		return releaseVersion
+	}
 	return strings.TrimSpace(version)
 }
 

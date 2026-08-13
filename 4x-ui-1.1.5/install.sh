@@ -36,6 +36,47 @@ arch() {
 
 echo "Arch: $(arch)"
 
+verify_release_archive() {
+    local archive="$1"
+    local tag="$2"
+    local checksum_url="https://github.com/sharif102007/4x-ui/releases/download/${tag}/$(basename "${archive}").sha256"
+    local checksum_text expected actual member
+
+    checksum_text=$(curl -fLsS --connect-timeout 15 --max-time 120 --retry 3 "${checksum_url}") || {
+        echo -e "${red}Failed to download the release checksum.${plain}"
+        return 1
+    }
+    expected=$(printf '%s\n' "${checksum_text}" | awk 'NR == 1 {print tolower($1)}')
+    if [[ ! "${expected}" =~ ^[0-9a-f]{64}$ ]]; then
+        echo -e "${red}The release checksum is invalid.${plain}"
+        return 1
+    fi
+    if command -v sha256sum > /dev/null 2>&1; then
+        actual=$(sha256sum "${archive}" | awk '{print tolower($1)}')
+    else
+        actual=$(openssl dgst -sha256 "${archive}" | awk '{print tolower($NF)}')
+    fi
+    if [[ "${actual}" != "${expected}" ]]; then
+        echo -e "${red}Release checksum mismatch; the current installation was not changed.${plain}"
+        return 1
+    fi
+    tar -tzf "${archive}" > /dev/null 2>&1 || {
+        echo -e "${red}The downloaded release archive is corrupt.${plain}"
+        return 1
+    }
+    for member in x-ui/x-ui x-ui/x-ui.sh x-ui/bin/xray-linux-$(arch); do
+        tar -tzf "${archive}" | grep -Fxq "${member}" || {
+            echo -e "${red}Release archive is missing ${member}.${plain}"
+            return 1
+        }
+    done
+    if tar -tzf "${archive}" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+        echo -e "${red}Unsafe path found in the release archive.${plain}"
+        return 1
+    fi
+    echo -e "${green}Release checksum and archive structure verified.${plain}"
+}
+
 # Simple helpers
 is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && return 0 || return 1
@@ -902,9 +943,8 @@ install_x-ui() {
             exit 1
         fi
     fi
-    curl -4fLR --connect-timeout 10 --max-time 120 --retry 3 --retry-delay 2 -o /usr/bin/x-ui-temp https://raw.githubusercontent.com/sharif102007/4x-ui/main/x-ui.sh
-    if [[ $? -ne 0 ]]; then
-        echo -e "${red}Failed to download x-ui.sh${plain}"
+    if ! verify_release_archive "x-ui-linux-$(arch).tar.gz" "${tag_version}"; then
+        rm -f "x-ui-linux-$(arch).tar.gz"
         exit 1
     fi
 
@@ -930,7 +970,7 @@ install_x-ui() {
     # so fetch as a fallback rather than failing the install.
     for helper in network-optimize.sh limits-diag.sh 4xui-shaper.sh; do
         if [[ ! -f "${helper}" ]]; then
-            curl -4fLRo "${helper}" "https://raw.githubusercontent.com/sharif102007/4x-ui/main/${helper}" ||
+            curl -4fLRo "${helper}" "https://raw.githubusercontent.com/sharif102007/4x-ui/${tag_version}/${helper}" ||
                 echo -e "${yellow}Warning: could not fetch ${helper}; 'x-ui netopt' and 'x-ui diag' will be unavailable${plain}"
         fi
         [[ -f "${helper}" ]] && chmod +x "${helper}"
@@ -939,7 +979,7 @@ install_x-ui() {
     chmod +x x-ui bin/xray-linux-$(arch)
 
     # Update x-ui cli and se set permission
-    mv -f /usr/bin/x-ui-temp /usr/bin/x-ui
+    install -m 755 x-ui.sh /usr/bin/x-ui
     chmod +x /usr/bin/x-ui
     mkdir -p /var/log/x-ui
     config_after_install
@@ -959,7 +999,7 @@ install_x-ui() {
     fi
 
     if [[ $release == "alpine" ]]; then
-        curl -4fLRo /etc/init.d/x-ui https://raw.githubusercontent.com/sharif102007/4x-ui/main/x-ui.rc
+        curl -4fLRo /etc/init.d/x-ui https://raw.githubusercontent.com/sharif102007/4x-ui/${tag_version}/x-ui.rc
         if [[ $? -ne 0 ]]; then
             echo -e "${red}Failed to download x-ui.rc${plain}"
             exit 1
@@ -1016,13 +1056,13 @@ install_x-ui() {
             echo -e "${yellow}Service files not found in tar.gz, downloading from GitHub...${plain}"
             case "${release}" in
                 ubuntu | debian | armbian)
-                    curl -4fLRo ${xui_service}/x-ui.service https://raw.githubusercontent.com/sharif102007/4x-ui/main/x-ui.service.debian > /dev/null 2>&1
+                    curl -4fLRo ${xui_service}/x-ui.service https://raw.githubusercontent.com/sharif102007/4x-ui/${tag_version}/x-ui.service.debian > /dev/null 2>&1
                     ;;
                 arch | manjaro | parch)
-                    curl -4fLRo ${xui_service}/x-ui.service https://raw.githubusercontent.com/sharif102007/4x-ui/main/x-ui.service.arch > /dev/null 2>&1
+                    curl -4fLRo ${xui_service}/x-ui.service https://raw.githubusercontent.com/sharif102007/4x-ui/${tag_version}/x-ui.service.arch > /dev/null 2>&1
                     ;;
                 *)
-                    curl -4fLRo ${xui_service}/x-ui.service https://raw.githubusercontent.com/sharif102007/4x-ui/main/x-ui.service.rhel > /dev/null 2>&1
+                    curl -4fLRo ${xui_service}/x-ui.service https://raw.githubusercontent.com/sharif102007/4x-ui/${tag_version}/x-ui.service.rhel > /dev/null 2>&1
                     ;;
             esac
 

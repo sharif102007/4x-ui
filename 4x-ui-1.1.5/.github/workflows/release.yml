@@ -66,8 +66,15 @@ jobs:
           while IFS= read -r script; do bash -n "$script"; done < <(find . -type f -name '*.sh' -print)
           grep -Fq 'socket = l:TCP_NODELAY=1' web/service/ssh_system.go
           grep -Fq 'socket = r:TCP_NODELAY=1' web/service/ssh_system.go
+          grep -Fq 'stunnelConfPath       = "/etc/x-ui/ssh-manager/stunnel.conf"' web/service/ssh_system.go
+          grep -Fq 'lport=22' web/service/ssh_system.go
+          grep -Fq 's.run(sshdBin, "-T", "-C", sshdTestConnection)' web/service/ssh_system.go
           grep -Fq 'SetNoDelay(true)' web/service/ssh_payload_gateway.go
           grep -Fq 'shaping policy unchanged and healthy; live qdisc preserved' 4xui-shaper.sh
+          grep -Fq 'verify_release_archive' install.sh
+          grep -Fq 'verify_release_archive' update.sh
+          grep -Fq 'install -m 755 x-ui.sh /usr/bin/x-ui' install.sh
+          grep -Fq 'install -m 755 x-ui.sh /usr/bin/x-ui' update.sh
           if grep -RInE 'net\.ipv4\.tcp_nodelay' --include='*.go' --include='*.sh' .; then
             echo 'Invalid TCP_NODELAY sysctl found' >&2
             exit 1
@@ -106,7 +113,15 @@ jobs:
           export GOOS=linux
           export GOARCH=amd64
           export CC=musl-gcc
-          go build -ldflags "-w -s -linkmode external -extldflags '-static'" -o xui-release -v .
+          expected_version="$(tr -d '[:space:]' < config/version)"
+          rm -f xui-release
+          go build -ldflags "-w -s -X github.com/sharif102007/4x-ui/v2/config.buildVersion=${expected_version} -linkmode external -extldflags '-static'" -o xui-release -v main.go
+          built_version="$(./xui-release -v | tr -d '[:space:]')"
+          if [ "$built_version" != "$expected_version" ]; then
+            echo "Compiled panel version mismatch: expected $expected_version, got $built_version" >&2
+            exit 1
+          fi
+          echo "Compiled panel version confirmed: $built_version"
           file xui-release
           if ldd xui-release 2>&1 | grep -q 'not a dynamic executable'; then
             echo "Static binary confirmed"
@@ -248,7 +263,15 @@ jobs:
           go version
           gcc --version
 
-          go build -ldflags "-w -s" -o xui-release.exe -v main.go
+          expected_version="$(tr -d '[:space:]' < config/version)"
+          rm -f xui-release.exe
+          go build -ldflags "-w -s -X github.com/sharif102007/4x-ui/v2/config.buildVersion=${expected_version}" -o xui-release.exe -v main.go
+          built_version="$(./xui-release.exe -v | tr -d '[:space:]')"
+          if [ "$built_version" != "$expected_version" ]; then
+            echo "Compiled panel version mismatch: expected $expected_version, got $built_version" >&2
+            exit 1
+          fi
+          echo "Compiled panel version confirmed: $built_version"
 
       - name: Copy and download resources
         shell: pwsh

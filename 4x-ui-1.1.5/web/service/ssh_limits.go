@@ -29,6 +29,7 @@ var (
 	sshLastBytes       = map[int]int64{}
 	sshPolicyMu        sync.Mutex
 	sshPolicySignature string
+	sshRateStateReady  bool
 	// One table dump contains every named counter. The old implementation ran
 	// two `nft` processes per user every five seconds, which caused periodic CPU
 	// and I/O spikes on small VPS instances.
@@ -67,14 +68,19 @@ func validateUserLimits(u *model.SshUser) error {
 
 func (s *SshManagerService) ResetUserTraffic(id int) error {
 	now := time.Now().UnixMilli()
-	if err := database.GetDB().Model(&model.SshUser{}).Where("id = ?", id).Updates(map[string]any{"traffic_used": 0, "last_reset_time": now}).Error; err != nil {
-		return err
+	result := database.GetDB().Model(&model.SshUser{}).Where("id = ?", id).Updates(map[string]any{"traffic_used": 0, "last_reset_time": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("user not found")
 	}
 	sshCounterMu.Lock()
 	delete(sshLastBytes, id)
 	sshCounterMu.Unlock()
 	sshPolicyMu.Lock()
 	sshPolicySignature = ""
+	sshRateStateReady = false
 	sshPolicyMu.Unlock()
 	return nil
 }
@@ -153,14 +159,38 @@ func applyNftTable(name, script string) error {
 	if out, err := check.CombinedOutput(); err != nil {
 		return fmt.Errorf("invalid nft policy: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	_ = exec.Command("nft", "delete", "table", "inet", name).Run()
+	applyScript := script
+	hadTable := nftTableExists(name)
+	if hadTable {
+		// nft executes a file as one netlink batch. Delete + recreate together so
+		// a runtime failure rolls the whole change back and preserves the old
+		// working policy instead of leaving the host with no table.
+		applyScript = fmt.Sprintf("delete table inet %s\n%s", name, script)
+	}
 	cmd := exec.Command("nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(script)
+	cmd.Stdin = strings.NewReader(applyScript)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		// A firewall reload may remove the table between the existence probe and
+		// the atomic batch. In that one race, retry creation without delete.
+		if hadTable && !nftTableExists(name) {
+			retry := exec.Command("nft", "-f", "-")
+			retry.Stdin = strings.NewReader(script)
+			if retryOut, retryErr := retry.CombinedOutput(); retryErr == nil {
+				return nil
+			} else {
+				return fmt.Errorf("nft apply failed after table disappeared: %w: %s", retryErr, strings.TrimSpace(string(retryOut)))
+			}
+		}
 		return fmt.Errorf("nft apply failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func nftTableExists(name string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "nft", "list", "table", "inet", name).Run() == nil
 }
 
 func buildSSHPolicy(users []model.SshUser) (string, string, []shaperRate, error) {
@@ -208,14 +238,25 @@ func ensureSSHPolicy(users []model.SshUser) bool {
 	}
 	sshPolicyMu.Lock()
 	defer sshPolicyMu.Unlock()
-	if sig == sshPolicySignature {
-		return false
+	if sig == sshPolicySignature && nftTableExists(sshNftTable) {
+		if sshRateStateReady && shaperRateStateExists("ssh") {
+			return false
+		}
+		sshRateStateReady = false
+		if err := writeShaperRateState("ssh", rates); err != nil {
+			logger.Warningf("ssh-manager: queue-rate state retry failed; using nftables policer: %v", err)
+			return false
+		}
+		sshRateStateReady = true
+		setSshSpeedLimitPresence(hasEnabledSpeedLimit(users))
+		return true
 	}
 	if err := applyNftTable(sshNftTable, script); err != nil {
 		logger.Warningf("ssh-manager: bandwidth/traffic policy unavailable: %v", err)
 		return false
 	}
 	sshPolicySignature = sig
+	sshRateStateReady = false
 	sshCounterMu.Lock()
 	sshLastBytes = map[int]int64{}
 	sshCounterMu.Unlock()
@@ -225,20 +266,23 @@ func ensureSSHPolicy(users []model.SshUser) bool {
 		logger.Warningf("ssh-manager: queue-rate state unavailable; using nftables policer: %v", err)
 		return false
 	}
+	sshRateStateReady = true
 	logger.Infof("ssh-manager: applied traffic and speed policy for %d users", len(users))
 
 	// Tell the shaper whether any SSH user still needs real queueing. Counters
 	// are installed for every user, so the presence of the table alone does not
 	// imply a rate limit.
-	hasSpeedLimit := false
+	setSshSpeedLimitPresence(hasEnabledSpeedLimit(users))
+	return true
+}
+
+func hasEnabledSpeedLimit(users []model.SshUser) bool {
 	for i := range users {
 		if users[i].SpeedLimit && (users[i].DownloadMbps > 0 || users[i].UploadMbps > 0) {
-			hasSpeedLimit = true
-			break
+			return true
 		}
 	}
-	setSshSpeedLimitPresence(hasSpeedLimit)
-	return true
+	return false
 }
 
 func parseSSHCounterBytes(raw string) map[int]int64 {

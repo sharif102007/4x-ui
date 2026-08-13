@@ -67,9 +67,11 @@ type Status struct {
 		Total   uint64 `json:"total"`
 	} `json:"disk"`
 	Xray struct {
-		State    ProcessState `json:"state"`
-		ErrorMsg string       `json:"errorMsg"`
-		Version  string       `json:"version"`
+		State        ProcessState `json:"state"`
+		ErrorMsg     string       `json:"errorMsg"`
+		Version      string       `json:"version"`
+		LimitApplied int          `json:"limitApplied"`
+		LimitError   string       `json:"limitError"`
 	} `json:"xray"`
 	Uptime   uint64    `json:"uptime"`
 	Loads    []float64 `json:"loads"`
@@ -402,6 +404,7 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		status.Xray.ErrorMsg = s.xrayService.GetXrayResult()
 	}
 	status.Xray.Version = s.xrayService.GetXrayVersion()
+	status.Xray.LimitApplied, status.Xray.LimitError = XrayLimitStatus()
 
 	// Application stats
 	var rtm runtime.MemStats

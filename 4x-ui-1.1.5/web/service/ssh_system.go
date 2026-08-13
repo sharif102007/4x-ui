@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,20 +22,28 @@ import (
 // Filesystem locations owned by the SSH Manager. These are fixed, never built
 // from user input, so there is no path-traversal surface here.
 const (
-	sshdDropinPath  = "/etc/ssh/sshd_config.d/99-xui-ssh-manager.conf"
-	stunnelConfPath = "/etc/stunnel/xui-ssh-manager.conf"
-	stunnelUnitPath = "/etc/systemd/system/xui-stunnel.service"
-	bannerDir       = "/etc/x-ui/ssh-manager/banners"
-	certDir         = "/etc/x-ui/ssh-manager/certs"
+	sshdDropinPath        = "/etc/ssh/sshd_config.d/00-xui-ssh-manager.conf"
+	legacySshdDropinPath  = "/etc/ssh/sshd_config.d/99-xui-ssh-manager.conf"
+	stunnelConfPath       = "/etc/x-ui/ssh-manager/stunnel.conf"
+	legacyStunnelConfPath = "/etc/stunnel/xui-ssh-manager.conf"
+	stunnelUnitPath       = "/etc/systemd/system/xui-stunnel.service"
+	bannerDir             = "/etc/x-ui/ssh-manager/banners"
+	certDir               = "/etc/x-ui/ssh-manager/certs"
 
 	sshUsersGroup = "xui-ssh-users"
 
 	cmdTimeout = 30 * time.Second
+
+	// OpenSSH requires every Match criterion used by the configuration to be
+	// supplied when `sshd -T` evaluates the effective configuration. In
+	// particular, omitting lport makes any `Match LocalPort` block fatal.
+	sshdTestConnection = "user=root,host=localhost,addr=127.0.0.1,laddr=127.0.0.1,lport=22"
 )
 
 // usernameRe enforces the spec: A-Z a-z 0-9 underscore hyphen, first char not a
 // hyphen (useradd rejects leading '-'), max 32 chars.
 var usernameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$`)
+var certDNSNameRe = regexp.MustCompile(`^(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 
 // protectedUsers must never be created, modified, disabled or deleted by the
 // panel. Includes the names called out in the spec plus the standard Debian
@@ -55,7 +64,11 @@ type sshSystem struct{}
 
 // run executes a command with an explicit argument vector and a timeout.
 func (sshSystem) run(name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	return sshSystem{}.runWithTimeout(cmdTimeout, name, args...)
+}
+
+func (sshSystem) runWithTimeout(timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	var out bytes.Buffer
@@ -201,11 +214,31 @@ func (s sshSystem) applySshdPorts(ports []int, banners map[int]string) error {
 		return err
 	}
 
+	// Separate old panel-managed ports from the administrator's effective SSH
+	// ports. Preserve only the latter when an inbound is edited or deleted.
+	prev, prevErr := os.ReadFile(sshdDropinPath)
+	legacyPrev, legacyPrevErr := os.ReadFile(legacySshdDropinPath)
+	oldManagedPorts := sshdPortsFromText(string(prev))
+	for p := range sshdPortsFromText(string(legacyPrev)) {
+		oldManagedPorts[p] = struct{}{}
+	}
+	effectiveText, effectiveErr := s.run(sshdBin, "-T", "-C", sshdTestConnection)
+	if effectiveErr != nil {
+		return fmt.Errorf("read effective sshd configuration: %s", strings.TrimSpace(effectiveText))
+	}
+	preservedPorts := make([]int, 0)
+	for p := range sshdPortsFromText(effectiveText) {
+		if _, wasManaged := oldManagedPorts[p]; !wasManaged {
+			preservedPorts = append(preservedPorts, p)
+		}
+	}
+	sort.Ints(preservedPorts)
+
 	var sb strings.Builder
 	sb.WriteString("# Managed by 4x-ui SSH Manager. Do not edit by hand.\n")
 	sb.WriteString("# Additive Port directives only; your existing SSH port is preserved.\n")
 	seen := map[int]struct{}{}
-	for _, p := range ports {
+	for _, p := range append(preservedPorts, ports...) {
 		if p <= 0 {
 			continue
 		}
@@ -272,22 +305,31 @@ func (s sshSystem) applySshdPorts(ports []int, banners map[int]string) error {
 		sb.WriteString(fmt.Sprintf("    Banner %s\n", path))
 	}
 
-	// Snapshot previous content for rollback.
-	prev, hadPrev := os.ReadFile(sshdDropinPath)
+	restoreDropins := func() {
+		if prevErr == nil {
+			_ = os.WriteFile(sshdDropinPath, prev, 0o644)
+		} else {
+			_ = os.Remove(sshdDropinPath)
+		}
+		if legacyPrevErr == nil {
+			_ = os.WriteFile(legacySshdDropinPath, legacyPrev, 0o644)
+		} else {
+			_ = os.Remove(legacySshdDropinPath)
+		}
+	}
 
 	if err := os.WriteFile(sshdDropinPath, []byte(sb.String()), 0o644); err != nil {
 		return err
+	}
+	if err := os.Remove(legacySshdDropinPath); err != nil && !os.IsNotExist(err) {
+		restoreDropins()
+		return fmt.Errorf("remove legacy sshd drop-in: %v", err)
 	}
 
 	// Validate the *whole* effective config (sshd -t reads the main file which
 	// Includes our drop-in on Debian 12).
 	if out, terr := s.run(sshdBin, "-t"); terr != nil {
-		// rollback
-		if hadPrev == nil {
-			_ = os.WriteFile(sshdDropinPath, prev, 0o644)
-		} else {
-			_ = os.Remove(sshdDropinPath)
-		}
+		restoreDropins()
 		return fmt.Errorf("sshd config validation failed, rolled back: %s", strings.TrimSpace(out))
 	}
 
@@ -297,15 +339,26 @@ func (s sshSystem) applySshdPorts(ports []int, banners map[int]string) error {
 
 	if err := s.restartSsh(); err != nil {
 		// rollback config and try to restore the daemon to its prior state.
-		if hadPrev == nil {
-			_ = os.WriteFile(sshdDropinPath, prev, 0o644)
-		} else {
-			_ = os.Remove(sshdDropinPath)
-		}
+		restoreDropins()
 		_ = s.restartSsh()
 		return fmt.Errorf("failed to restart ssh, rolled back: %v", err)
 	}
 	return nil
+}
+
+func sshdPortsFromText(text string) map[int]struct{} {
+	ports := make(map[int]struct{})
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "port") {
+			continue
+		}
+		port, err := strconv.Atoi(fields[1])
+		if err == nil && validPort(port) == nil {
+			ports[port] = struct{}{}
+		}
+	}
+	return ports
 }
 
 // ensureSshSocketDisabled stops + disables socket-activated SSH when present,
@@ -474,9 +527,13 @@ func (s sshSystem) lockUser(username string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = s.run(usermod, "-L", username) // lock password
+	if out, runErr := s.run(usermod, "-L", username); runErr != nil {
+		return fmt.Errorf("usermod lock: %s", strings.TrimSpace(out))
+	}
 	if chage, err := s.tool("chage", "/usr/bin/chage"); err == nil {
-		_, _ = s.run(chage, "-E", "1", username) // expire (1970-01-02)
+		if out, runErr := s.run(chage, "-E", "1", username); runErr != nil {
+			return fmt.Errorf("chage lock: %s", strings.TrimSpace(out))
+		}
 	}
 	return nil
 }
@@ -486,25 +543,36 @@ func (s sshSystem) unlockUser(username string, expiry string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = s.run(usermod, "-U", username)
+	if out, runErr := s.run(usermod, "-U", username); runErr != nil {
+		return fmt.Errorf("usermod unlock: %s", strings.TrimSpace(out))
+	}
 	if chage, err := s.tool("chage", "/usr/bin/chage"); err == nil {
 		if expiry == "" {
-			_, _ = s.run(chage, "-E", "-1", username) // never expire
+			if out, runErr := s.run(chage, "-E", "-1", username); runErr != nil {
+				return fmt.Errorf("chage clear expiry: %s", strings.TrimSpace(out))
+			}
 		} else {
-			_, _ = s.run(chage, "-E", expiry, username)
+			if out, runErr := s.run(chage, "-E", expiry, username); runErr != nil {
+				return fmt.Errorf("chage set expiry: %s", strings.TrimSpace(out))
+			}
 		}
 	}
 	return nil
 }
 
-func (s sshSystem) setExpiry(username string, expiry string) {
+func (s sshSystem) setExpiry(username string, expiry string) error {
 	if chage, err := s.tool("chage", "/usr/bin/chage"); err == nil {
 		if expiry == "" {
-			_, _ = s.run(chage, "-E", "-1", username)
+			if out, runErr := s.run(chage, "-E", "-1", username); runErr != nil {
+				return fmt.Errorf("chage clear expiry: %s", strings.TrimSpace(out))
+			}
 		} else {
-			_, _ = s.run(chage, "-E", expiry, username)
+			if out, runErr := s.run(chage, "-E", expiry, username); runErr != nil {
+				return fmt.Errorf("chage set expiry: %s", strings.TrimSpace(out))
+			}
 		}
 	}
+	return nil
 }
 
 func (s sshSystem) deleteUser(username string) error {
@@ -527,35 +595,64 @@ func (s sshSystem) deleteUser(username string) error {
 // Certificates (self-signed generation)
 // ---------------------------------------------------------------------------
 
+func certificateIdentity(host string) (string, string) {
+	host = strings.TrimSpace(host)
+	if ip := net.ParseIP(host); ip != nil {
+		value := ip.String()
+		return value, "IP:" + value
+	}
+	if !certDNSNameRe.MatchString(host) {
+		host = "ssh.local"
+	}
+	return host, "DNS:" + host
+}
+
 func (s sshSystem) selfSignedCert(id int, host string) (string, string, error) {
 	if err := os.MkdirAll(certDir, 0o700); err != nil {
 		return "", "", err
 	}
 	crt := filepath.Join(certDir, fmt.Sprintf("ssh-%d.crt", id))
 	key := filepath.Join(certDir, fmt.Sprintf("ssh-%d.key", id))
-	if _, err := os.Stat(crt); err == nil {
-		if _, err := os.Stat(key); err == nil {
-			return crt, key, nil // reuse existing
-		}
-	}
 	openssl, err := s.tool("openssl", "/usr/bin/openssl")
 	if err != nil {
 		return "", "", err
 	}
-	cn := host
-	if cn == "" {
-		cn = "ssh.local"
+	cn, san := certificateIdentity(host)
+	checkArg := "-checkhost"
+	if strings.HasPrefix(san, "IP:") {
+		checkArg = "-checkip"
 	}
+	if _, crtErr := os.Stat(crt); crtErr == nil {
+		if _, keyErr := os.Stat(key); keyErr == nil {
+			if _, verifyErr := s.run(openssl, "x509", "-in", crt, "-noout", checkArg, cn); verifyErr == nil {
+				return crt, key, nil
+			}
+		}
+	}
+	tmpCrt := crt + ".new"
+	tmpKey := key + ".new"
+	_ = os.Remove(tmpCrt)
+	_ = os.Remove(tmpKey)
+	defer os.Remove(tmpCrt)
+	defer os.Remove(tmpKey)
 	args := []string{
 		"req", "-x509", "-nodes", "-newkey", "rsa:2048",
-		"-keyout", key, "-out", crt, "-days", "3650",
+		"-keyout", tmpKey, "-out", tmpCrt, "-days", "3650",
 		"-subj", "/CN=" + cn,
-		"-addext", "subjectAltName=DNS:" + cn,
+		"-addext", "subjectAltName=" + san,
 	}
 	if out, err := s.run(openssl, args...); err != nil {
 		return "", "", fmt.Errorf("openssl: %s", strings.TrimSpace(out))
 	}
-	_ = os.Chmod(key, 0o600)
+	if err := os.Chmod(tmpKey, 0o600); err != nil {
+		return "", "", err
+	}
+	if err := os.Rename(tmpKey, key); err != nil {
+		return "", "", err
+	}
+	if err := os.Rename(tmpCrt, crt); err != nil {
+		return "", "", err
+	}
 	return crt, key, nil
 }
 
@@ -577,6 +674,7 @@ func (s sshSystem) writeStunnel(svcs []stunnelSvc) error {
 		// Nothing to serve: stop the instance and remove config.
 		s.stopStunnel()
 		_ = os.Remove(stunnelConfPath)
+		_ = os.Remove(legacyStunnelConfPath)
 		return nil
 	}
 	stunnelBin, err := s.tool("stunnel", "stunnel4", "/usr/bin/stunnel", "/usr/bin/stunnel4")
@@ -648,6 +746,23 @@ WantedBy=multi-user.target
 	systemctl, err := s.tool("systemctl", "/usr/bin/systemctl", "/bin/systemctl")
 	if err != nil {
 		return err
+	}
+	// Older builds placed this file in /etc/stunnel. Debian's global
+	// stunnel4.service loads every *.conf there, so both the global daemon and
+	// xui-stunnel could start the same listeners and race with "address already
+	// in use". Move panel state outside that glob. If the global daemon had
+	// already loaded the legacy file, reload it once to release those sockets
+	// without disabling or taking ownership of unrelated stunnel services.
+	if _, legacyErr := os.Stat(legacyStunnelConfPath); legacyErr == nil {
+		if err := os.Remove(legacyStunnelConfPath); err != nil {
+			return fmt.Errorf("remove legacy stunnel config: %v", err)
+		}
+		active, _ := s.run(systemctl, "is-active", "stunnel4.service")
+		if strings.TrimSpace(active) == "active" {
+			if out, reloadErr := s.run(systemctl, "reload", "stunnel4.service"); reloadErr != nil {
+				return fmt.Errorf("reload global stunnel after legacy config migration: %s", strings.TrimSpace(out))
+			}
+		}
 	}
 	if unitChanged {
 		_, _ = s.run(systemctl, "daemon-reload")

@@ -77,7 +77,7 @@ func EnsureBadvpn() error {
 	var s sshSystem
 
 	// Try apt first (works on Ubuntu, older Debian)
-	out, err := s.run("apt-get", "install", "-y", "badvpn")
+	out, err := s.runWithTimeout(5*time.Minute, "apt-get", "install", "-y", "badvpn")
 	if err == nil && BadvpnInstalled() {
 		logger.Info("ssh-manager: badvpn installed via apt")
 		return nil
@@ -86,9 +86,10 @@ func EnsureBadvpn() error {
 
 	// Compile from source (required on Debian 12 — not in repos)
 	deps := []string{"build-essential", "cmake", "git"}
-	if _, err2 := s.run("apt-get", append([]string{"install", "-y"}, deps...)...); err2 != nil {
+	if _, err2 := s.runWithTimeout(5*time.Minute, "apt-get", append([]string{"install", "-y"}, deps...)...); err2 != nil {
 		return fmt.Errorf("build deps install failed: %v", err2)
 	}
+	_, _ = s.run("rm", "-rf", "/tmp/badvpn-src")
 	steps := [][]string{
 		{"git", "clone", "--depth=1", "https://github.com/ambrop72/badvpn.git", "/tmp/badvpn-src"},
 		{"cmake", "-S", "/tmp/badvpn-src", "-B", "/tmp/badvpn-src/build",
@@ -96,7 +97,7 @@ func EnsureBadvpn() error {
 		{"make", "-C", "/tmp/badvpn-src/build", "-j4"},
 	}
 	for _, args := range steps {
-		if o, e := s.run(args[0], args[1:]...); e != nil {
+		if o, e := s.runWithTimeout(5*time.Minute, args[0], args[1:]...); e != nil {
 			return fmt.Errorf("badvpn compile failed (%v): %s", args[0], o)
 		}
 	}
@@ -128,7 +129,14 @@ func startUdpRelay(id, port int) {
 }
 
 func (p *udpRelayProc) supervise() {
-	defer close(p.done)
+	defer func() {
+		udpRelayMu.Lock()
+		if udpRelays[p.id] == p {
+			delete(udpRelays, p.id)
+		}
+		udpRelayMu.Unlock()
+		close(p.done)
+	}()
 	failures := 0
 	for {
 		select {

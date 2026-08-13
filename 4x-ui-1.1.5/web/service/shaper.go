@@ -41,8 +41,8 @@ const (
 )
 
 var (
-	shaperMu       sync.Mutex
-	shaperUnusable bool
+	shaperMu         sync.Mutex
+	shaperRetryAfter time.Time
 )
 
 // shaperScriptPath locates the script next to the running binary. Returns ""
@@ -90,18 +90,20 @@ func syncTrafficShaper(wanted bool) {
 	}
 
 	if wanted {
-		if shaperUnusable {
+		if time.Now().Before(shaperRetryAfter) {
 			return
 		}
 		// `check` is cheap and non-mutating; it tells us whether the kernel has
 		// htb, ifb and act_connmark before we touch the live qdisc tree.
 		if err := runShaper(script, "check"); err != nil {
-			// Latch it: probing once per policy change on a host that will
-			// never support it is pure noise.
-			shaperUnusable = true
+			// Retry later: packages/modules may be installed after the panel
+			// starts, and a transient helper failure must not disable queue
+			// shaping until the next process restart.
+			shaperRetryAfter = time.Now().Add(5 * time.Minute)
 			logger.Warningf("shaper: host cannot support queue shaping, staying on the nftables policer (%v)", err)
 			return
 		}
+		shaperRetryAfter = time.Time{}
 		if err := runShaper(script, "apply"); err != nil {
 			logger.Warningf("shaper: apply failed, staying on the nftables policer: %v", err)
 			return
