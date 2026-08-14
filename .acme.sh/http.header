@@ -1,11 +1,29 @@
 HTTP/2 200 
-server: nginx
-date: Thu, 13 Aug 2026 15:53:05 GMT
-content-type: application/json
-content-length: 101
-cache-control: public, max-age=0, no-cache
-link: <https://acme-v02.api.letsencrypt.org/directory>;rel="index"
-retry-after: 19161
-x-frame-options: DENY
-strict-transport-security: max-age=604800
+date: Thu, 13 Aug 2026 21:55:48 GMT
+cache-control: public, max-age=60, s-maxage=60
+vary: Accept,Accept-Encoding, Accept, X-Requested-With
+last-modified: Thu, 13 Aug 2026 18:17:27 GMT
+x-github-api-version-selected: 2022-11-28
+access-control-expose-headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+access-control-allow-origin: *
+strict-transport-security: max-age=31536000; includeSubdomains; preload
+x-frame-options: deny
+x-content-type-options: nosniff
+x-xss-protection: 0
+referrer-policy: origin-when-cross-origin, strict-origin-when-cross-origin
+content-security-policy: default-src 'none'
+server: github.com
+content-type: application/json; charset=utf-8
+x-poll-interval: 300
+x-github-media-type: github.v3; format=json
+etag: W/"9cd8f811072df1e84cd533052ab4e6afe8fbbbfbad8f345bc23e69cf0f945bfe"
+accept-ranges: bytes
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 50
+x-ratelimit-used: 10
+x-ratelimit-resource: core
+x-ratelimit-reset: 1786660639
+content-length: 357
+x-github-request-id: D4F8:1F34FA:B1F5E5:BFA7B7:6A7E3D64
+x-github-edge-region: southeastasia
 
